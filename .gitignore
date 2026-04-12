@@ -1,0 +1,8 @@
+.env
+.venv/
+runs/
+archive/
+.claude/logs/
+.chrome-profile/
+node_modules/
+*.log

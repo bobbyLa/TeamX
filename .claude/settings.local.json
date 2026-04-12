@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__query-docs",
+      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('E:/Team2/TeamX/.mcp.json','utf8'\\)\\); console.log\\('mcp.json OK'\\)\")",
+      "Bash(node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('E:/Team2/TeamX/.claude/settings.json','utf8'\\)\\); console.log\\('settings.json OK'\\)\")",
+      "Bash(bash -n \"E:/Team2/TeamX/.claude/hooks/pre-write-guard.sh\")",
+      "Bash(bash -n \"E:/Team2/TeamX/.claude/hooks/log-tool-call.sh\")",
+      "Bash(cat)",
+      "Read(//tmp/**)",
+      "mcp__plugin_github_github__get_teams",
+      "mcp__plugin_github_github__create_repository"
+    ]
+  }
+}
