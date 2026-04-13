@@ -21,4 +21,13 @@ Never:
 - Return long prose as your final message. Write the file, then report `wrote runs/<slug>/raw/<source>.json` and nothing else.
 - Edit any file outside `runs/<slug>/`.
 
-Inputs you expect from the invoking session: `slug`, `site`, `question`. If any are missing, fail fast with an error stub at `runs/<slug>/raw/<site>.json`.
+## Concurrency
+
+`chrome-devtools` MCP is a single stateful connection to one Chrome process.
+The orchestrator serializes all `browser-operator` calls on this lane - when
+you run, you own the Chrome session exclusively. Do not defensively re-check
+for another instance, and do not treat unexpected tab focus changes as a
+race you should recover from; if you see one, it is an orchestrator bug that
+should fail loudly rather than be worked around here.
+
+Inputs you expect from the invoking session: `slug`, `site`, and either `question` (for AI sites) or `query` (for `site=x-scan`). If the required field for the given site is missing, fail fast with an error stub at `runs/<slug>/raw/<site>.json`.

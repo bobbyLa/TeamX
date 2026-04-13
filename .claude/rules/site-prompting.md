@@ -11,6 +11,7 @@ Wrap the user's question in a stable envelope before sending it into the site's 
 
 Rules:
 - Respond in GitHub-flavored Markdown.
+- **Respond in Simplified Chinese.** (All answers must be in Simplified Chinese.)
 - Keep the answer under 600 words.
 - At the end, include a "Sources" list with URLs (or say "no sources cited").
 - If you are unsure, say so explicitly instead of guessing.
@@ -24,7 +25,7 @@ The `[TeamX run <slug>]` header is the cross-reference key. It is how you later 
 
 Before touching any site:
 
-Treat product-specific surfaces under a shared parent domain as different targets when they may run in parallel. Example: reserve `x.com/i/grok` for Grok and `x.com/search` for `scan-x`.
+Treat product-specific surfaces under a shared parent domain as different tab-reuse targets, so the protocol stays deterministic across back-to-back steps in the serialized browser lane. Example: reserve `x.com/i/grok` for Grok and `x.com/search` for `scan-x` so a later step never picks up the wrong one.
 
 1. Call `list_pages`.
 2. If any page is already open on the target domain, `select_page` one of those pages. Do this even if the page is on the wrong subpath.

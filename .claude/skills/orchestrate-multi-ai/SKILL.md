@@ -1,6 +1,6 @@
 ---
 name: orchestrate-multi-ai
-description: Run a full multi-AI research workflow - fan out to GPT/Gemini/NotebookLM/Grok + Tavily in parallel, verify, synthesize, archive to Obsidian. Use when the user asks a research question that should draw on multiple AI perspectives. The main entry point for TeamX.
+description: Run a full multi-AI research workflow - Tavily fan-out runs concurrently with a serialized browser lane (GPT, Gemini, NotebookLM, Grok, and optional X scan) to avoid chrome-devtools connection contention, then verify, synthesize, archive to Obsidian. Use when the user asks a research question that should draw on multiple AI perspectives. The main entry point for TeamX.
 ---
 
 You are the composition recipe for a full TeamX run. This skill does no I/O itself - it instructs the main session on the order of operations.
@@ -17,16 +17,22 @@ You are the composition recipe for a full TeamX run. This skill does no I/O itse
 ### 1. Slugify
 Generate `slug = <YYYY-MM-DD>_<kebab-topic>` (<= 60 chars). Use today's date. `mkdir -p runs/<slug>/raw/tavily`.
 
-### 2. Fan out (parallel - ONE message, multiple Agent calls)
+### 2. Fan out (two-lane execution)
 
-In a single assistant message, launch these subagents in parallel:
+TeamX has two resource lanes with different concurrency rules:
 
-- For each `site` in `lineup`: launch `browser-operator` with prompt: `slug=<slug>, site=<site>, question=<question>, notebook_name=<if notebooklm>`. Each browser-operator invocation targets one site only.
-- If `include_tavily`: launch `research-scout` with `slug=<slug>, question=<question>`.
-- If `include_x_scan`: launch a second `browser-operator` with `site=x-scan, query=<derived from question>`.
-- If both `grok` and `x-scan` are active, keep them on separate browser surfaces. Grok owns a dedicated Grok tab; `x-scan` owns an X search/feed tab.
+- **Tavily lane** - `research-scout` uses the Tavily MCP server, which does not share browser session state with anything else.
+- **Browser lane** - every `browser-operator` call uses the same `chrome-devtools` MCP connection attached to one Chrome process. That connection is stateful, so two concurrent browser calls will clobber each other's selected page and snapshot state.
 
-**Do not sequentialize step 2.** Step 2 is the whole point of having subagents.
+Execution pattern:
+
+1. If `include_tavily`, kick off `research-scout` asynchronously with `slug=<slug>, question=<question>`. Let it run while the browser lane is executing.
+2. Drive the browser lane sequentially. For each `site` in `lineup`, launch exactly one foreground `browser-operator` with `slug=<slug>, site=<site>, question=<question>, notebook_name=<if notebooklm>`, wait for it to finish writing `runs/<slug>/raw/<site>.json`, then launch the next one.
+3. If `include_x_scan`, append one final foreground `browser-operator` call with `site=x-scan, query=<derived from question>` after the lineup sites finish.
+4. If both `grok` and `x-scan` are active, keep them on separate browser surfaces so the tab-reuse protocol stays deterministic when those two steps run back-to-back in the serialized browser lane. Grok owns a dedicated Grok tab; `x-scan` owns an X search/feed tab.
+5. Before proceeding to step 3, join the Tavily lane. If its raw artifacts are already on disk, continue; otherwise wait for its completion notification first.
+
+**Do not parallelize two `browser-operator` calls. Do not serialize Tavily behind the browser lane - it must overlap wall time with it.**
 
 ### 3. Verify (sequential, after all of step 2 completes)
 
@@ -38,7 +44,7 @@ Launch `synthesis-editor` with prompt: `slug=<slug>`. Produces `brief.md`.
 
 ### 5. Archive
 
-Launch `archive-curator` with prompt: `slug=<slug>`. Ships to `$OBSIDIAN_VAULT/TeamX/Runs/<slug>/` or `./archive/TeamX/Runs/<slug>/`.
+Launch `archive-curator` with prompt: `slug=<slug>`. It must resolve the vault root through `.claude/scripts/resolve-vault-root.ps1` and ship directly to the resolved path. Only mention `./archive/TeamX/Runs/<slug>/` when the resolver returned `source=archive`.
 
 ### 6. Report
 
@@ -51,7 +57,7 @@ Failures: <source names where error was set, or "none">
 ```
 
 ## Guarantees
-- Step 2 subagents are independent - no one reads another's output mid-run.
+- Step 2 subagents are independent across MCP lanes; within the browser lane they are serialized because `chrome-devtools` MCP is a single stateful connection to one Chrome process.
 - Steps 3-5 are strictly sequential. Do not start synthesis before verification finishes.
 - If step 2 has any partial failures (some sites wrote error stubs), still continue to step 3. The verifier is responsible for handling missing sources.
 - If `evidence.json` ends up with zero claims, fail the run and tell the user instead of writing an empty brief.

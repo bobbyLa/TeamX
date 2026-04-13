@@ -80,6 +80,7 @@ Long-term memory (Obsidian vault)          →  $OBSIDIAN_VAULT/TeamX/
 | Primitive              | Path                                        |
 | ---------------------- | ------------------------------------------- |
 | Orchestrator rules     | `CLAUDE.md` (this file), `.claude/rules/*`  |
+| Vault path rules       | `.claude/rules/vault-path-resolution.md`    |
 | Subagents              | `.claude/agents/<name>.md`                  |
 | Skills                 | `.claude/skills/<name>/SKILL.md`            |
 | MCP servers            | `.mcp.json`                                 |
@@ -140,7 +141,7 @@ All four servers (`chrome-devtools`, `tavily`, `filesystem`, `github`) must show
 /orchestrate-multi-ai "What are recent developments in MoE architectures?"
 ```
 
-The orchestrator skill generates a slug, fans out to the lineup **in parallel**, waits for all raw/ files, runs the verifier → synthesis-editor → archive-curator pipeline, and prints the path to `brief.md`.
+The orchestrator skill generates a slug, starts the Tavily lane asynchronously, walks the browser lane one `browser-operator` at a time, joins Tavily, runs the verifier → synthesis-editor → archive-curator pipeline, and prints the path to `brief.md`.
 
 For a quick dry run while you're still validating selectors, override the lineup:
 ```
@@ -182,8 +183,10 @@ For a quick dry run while you're still validating selectors, override the lineup
 - **Daily logs are manual.** `/log-day` is the only trigger. There is no Stop-hook automation; if you forget to run it, that day has no log. This is intentional — the cost of automated pollution of the vault is higher than the cost of occasional missed days.
 - **News capture is manual.** Open `News/inbox.md` and write when something catches your attention. Deep research triggers an `/orchestrate-multi-ai` run separately.
 - **Prompt templates live in the vault.** Write effective prompts into `Prompts/**` (tagged `type: prompt-template`) so they can be searched and iterated on in Obsidian. Verified improvements sync back to `.claude/skills/ask-*/SKILL.md`.
+- **All vault path decisions go through the shared resolver.** Before any write into `TeamX/**`, call `.claude/scripts/resolve-vault-root.ps1 -RepoRoot <repo-root> -OnMissing archive|error`. An empty shell `$OBSIDIAN_VAULT` is not enough to declare the vault unconfigured - the resolver must check `.env` first.
+- **Ad-hoc draft notes follow the same rule.** Even temporary `type: draft` notes under `TeamX/Knowledge/**` must write directly to the resolved vault path when the resolver returns `source=env` or `source=dotenv`. Do not stage them under `archive/` and migrate later.
 - **Adding a new AI site is strictly local:** copy `ask-gpt/SKILL.md` to `ask-<new-site>/SKILL.md`, change the domain and the extraction snippet, add the site name to `orchestrate-multi-ai/SKILL.md`'s default lineup. No subagent changes.
-- **Parallelism is non-negotiable in step 2 of `orchestrate-multi-ai`.** Fan-out must be a single assistant message with multiple Agent tool calls. Sequentializing defeats the architecture.
+- **Parallelism is non-negotiable across MCP lanes in step 2 of `orchestrate-multi-ai`.** Tavily (`research-scout`) must overlap wall time with the browser lane. Within the browser lane, `browser-operator` calls are serialized because `chrome-devtools` MCP is a single stateful connection to one Chrome process - parallel calls clobber each other's selected page. Never sequentialize the whole fan-out; never parallelize two `browser-operator` calls.
 - **Selectors come from `take_snapshot` at runtime**, not from hardcoded CSS. If a site's a11y tree changes, upgrade that one `ask-*` skill.
 - **Output contract is authoritative.** If a skill's output doesn't match `.claude/rules/output-contract.md`, fix the skill, not the contract.
 
@@ -196,6 +199,8 @@ Read from `.env` at the project root (gitignored). Template is in `.env.example`
 | `OBSIDIAN_VAULT`     | absolute path to the vault root; all three curators write under `<vault>/TeamX/{Runs,Daily,Knowledge,Index}/`. If unset, the project falls back to `./archive/TeamX/...` |
 | `CHROME_DEBUG_URL`   | chrome-devtools MCP `--browserUrl` target; default `http://127.0.0.1:9333` |
 | `GITHUB_PERSONAL_ACCESS_TOKEN` | GitHub MCP credential loaded by `.claude/scripts/start-github-mcp.ps1`; create it with `repo`, `read:user`, and `read:org` scopes |
+
+All production vault-path resolution must go through `.claude/scripts/resolve-vault-root.ps1`; do not treat an empty process env var as proof that `OBSIDIAN_VAULT` is unset.
 
 ## Security fences
 

@@ -16,7 +16,7 @@ You are driving the browser-operator subagent to get a Grok answer.
 
 1. `list_pages` first. Reuse an existing `grok.com` tab if one exists. If none exists, `new_page` to `https://grok.com/`, even if unrelated `x.com` tabs are already open.
 2. If the selected `grok.com` tab is on the wrong subpage, recover inside that same tab with `navigate_page` to `https://grok.com/`. Only if `grok.com` is unavailable should you fall back inside that same dedicated tab to `https://x.com/i/grok`.
-3. Never commandeer a general `x.com` tab for Grok. `scan-x` may be using it in parallel.
+3. Never commandeer a general `x.com` tab for Grok. `scan-x` owns the `x.com/search` surface in the browser lane; keep Grok on `grok.com` (fallback `x.com/i/grok`) so the two steps never fight over tab state.
 4. `take_snapshot`. Find the composer `textbox`. On grok.com it is usually labeled "Ask anything" or similar.
 5. Build the envelope from `site-prompting.md` and append the trailing line `Avoid speculation beyond what X posts support.` per the Grok deviation rule.
 6. `fill` the composer, `click` send (or Enter).

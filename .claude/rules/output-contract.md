@@ -27,7 +27,7 @@ One file per AI site or tool, written by a `browser-operator` or `research-scout
 - `citations` - optional array; empty array is fine, but include it when the site surfaces sources (NotebookLM, Gemini, Grok).
 - On failure, set `answer_md: null` and `error: { stage, message, screenshot_path? }`.
 
-Tavily outputs live in their own subfolder: `runs/<slug>/raw/tavily/search.json`, `raw/tavily/extract/<domain>.json`, `raw/tavily/crawl/<domain>.json`. Each wraps the raw Tavily response under a `result` key and adds the same `source` / `ts` / `error` fields.
+Tavily outputs live in their own subfolder. Search results use `runs/<slug>/raw/tavily/search-<n>.json` (one file per query variation, with `<n>` starting at 1). Extract and crawl outputs use `raw/tavily/extract/<domain>.json` and `raw/tavily/crawl/<domain>.json`. Each wraps the raw Tavily response under a `result` key and adds the same `source` / `ts` / `error` fields.
 
 ## 2. Evidence pack - `runs/<slug>/evidence.json`
 
