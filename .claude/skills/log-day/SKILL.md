@@ -20,9 +20,10 @@ If any of these are missing, best-effort infer from `.claude/logs/trace-<today>.
 1. Compute `<date>` = today in `YYYY-MM-DD` local time.
 2. Compute `<hhmm>` = current local time in `HH:MM`.
 3. Resolve target path:
-   - If `$OBSIDIAN_VAULT` is set: `<vault>/TeamX/Daily/<date>.md`
-   - Else read `./.env`, grep `^OBSIDIAN_VAULT=`, and if present use `<vault>/TeamX/Daily/<date>.md`
-   - Else: `./archive/TeamX/Daily/<date>.md`
+   - Call `powershell -NoProfile -ExecutionPolicy Bypass -File .claude/scripts/resolve-vault-root.ps1 -RepoRoot <repo-root> -OnMissing archive`
+   - Parse the JSON result and use `<root>/TeamX/Daily/<date>.md`
+   - Only treat `source=archive` / `usedFallback=true` as a real fallback
+   - If `source=env` or `source=dotenv`, write directly to that vault path and do not say the vault is unset
 4. Resolve `session_id`: use the provided value if present; else extract the newest `"session_id":"..."` from today's trace lines.
 5. If any structured inputs are missing, filter today's trace to lines whose `snippet` contains `"session_id":"<session_id>"`, then summarize the last ~200 matching lines only.
 6. Check if the target exists.
@@ -64,4 +65,4 @@ If any of these are missing, best-effort infer from `.claude/logs/trace-<today>.
 
 ## Final message
 
-`appended session block to <absolute path>` - or `created <absolute path>` if this was a new day. If fallback was used, append `(OBSIDIAN_VAULT missing in env and .env - used ./archive/)`.
+`appended session block to <absolute path>` - or `created <absolute path>` if this was a new day. Append the fallback warning only when the resolver returned `source=archive`.

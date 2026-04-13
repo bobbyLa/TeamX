@@ -7,13 +7,13 @@ You are invoking the `tavily` MCP server's search tool.
 
 ## Inputs
 - `slug`
-- `query` — the exact search query
-- `search_depth` — default `"advanced"` (matches `.mcp.json` DEFAULT_PARAMETERS)
-- `max_results` — default 10
-- `index` — integer for filename ordering when multiple searches in one run
+- `query` - the exact search query
+- `search_depth` - default `"advanced"` (matches `.mcp.json` DEFAULT_PARAMETERS)
+- `max_results` - default 10
+- `index` - integer for filename ordering when multiple searches in one run
 
 ## Call
-Use `mcp__tavily__tavily-search` with:
+Use `mcp__tavily__tavily_search` with:
 ```json
 {
   "query": "<query>",
@@ -40,4 +40,4 @@ Write `runs/<slug>/raw/tavily/search-<index>.json`:
 On any failure, still write the file with `result: null` and `error: {stage, message}`.
 
 ## Tip
-When invoked from research-scout, prefer firing multiple `tavily-search` calls as one parallel batch — do not sequentially await each. See `research-scout.md`.
+When invoked from research-scout, prefer firing multiple Tavily search MCP tool calls as one parallel batch via `mcp__tavily__tavily_search` instead of sequentially awaiting each. See `research-scout.md`.

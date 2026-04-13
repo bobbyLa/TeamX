@@ -29,6 +29,24 @@ One file per AI site or tool, written by a `browser-operator` or `research-scout
 
 Tavily outputs live in their own subfolder. Search results use `runs/<slug>/raw/tavily/search-<n>.json` (one file per query variation, with `<n>` starting at 1). Extract and crawl outputs use `raw/tavily/extract/<domain>.json` and `raw/tavily/crawl/<domain>.json`. Each wraps the raw Tavily response under a `result` key and adds the same `source` / `ts` / `error` fields.
 
+The Tavily lane also writes `runs/<slug>/raw/tavily/status.json` as a control artifact. This file is the authoritative completion sentinel for the Tavily lane; verifiers must not extract claims from it.
+
+```json
+{
+  "source": "tavily-status",
+  "mode": "background|inline-fallback",
+  "ts": "2026-04-13T12:36:00Z",
+  "searches_written": 5,
+  "extracts_written": 2,
+  "completed": true,
+  "error": null
+}
+```
+
+- `mode` distinguishes a background `research-scout` run from a main-session inline fallback.
+- `searches_written` / `extracts_written` count files written under `raw/tavily/`, including error stubs.
+- On lane-level failure, still write `status.json` with `completed: false` and `error: {stage, message}`.
+
 ## 2. Evidence pack - `runs/<slug>/evidence.json`
 
 Produced by `evidence-verifier` (via the `build-evidence-pack` skill). Normalizes the raw files into atomic claims with provenance.

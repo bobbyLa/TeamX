@@ -1,66 +1,25 @@
 $ErrorActionPreference = "Stop"
 
-function Get-DotEnvValue {
+function Resolve-VaultRoot {
     param(
         [Parameter(Mandatory = $true)]
-        [string]$Path,
+        [string]$RepoRoot,
         [Parameter(Mandatory = $true)]
-        [string]$Name
+        [ValidateSet("archive", "error")]
+        [string]$OnMissing
     )
 
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return $null
+    $resolver = Join-Path $RepoRoot ".claude\scripts\resolve-vault-root.ps1"
+    if (-not (Test-Path -LiteralPath $resolver)) {
+        throw "Vault resolver script '$resolver' does not exist."
     }
 
-    foreach ($line in Get-Content -LiteralPath $Path) {
-        $trimmed = $line.Trim()
-        if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith("#")) {
-            continue
-        }
-
-        $parts = $trimmed -split "=", 2
-        if ($parts.Count -ne 2 -or $parts[0].Trim() -ne $Name) {
-            continue
-        }
-
-        $value = $parts[1].Trim()
-        if ($value.Length -ge 2) {
-            $isDoubleQuoted = $value.StartsWith('"') -and $value.EndsWith('"')
-            $isSingleQuoted = $value.StartsWith("'") -and $value.EndsWith("'")
-            if ($isDoubleQuoted -or $isSingleQuoted) {
-                $value = $value.Substring(1, $value.Length - 2)
-            }
-        }
-
-        return $value
+    $resolutionJson = & $resolver -RepoRoot $RepoRoot -OnMissing $OnMissing
+    if ([string]::IsNullOrWhiteSpace($resolutionJson)) {
+        throw "Vault resolver returned no output."
     }
 
-    return $null
-}
-
-function Resolve-VaultRoot {
-    param([string]$RepoRoot)
-
-    $envPath = Join-Path $RepoRoot ".env"
-    $configuredRoot = $env:OBSIDIAN_VAULT
-    if ([string]::IsNullOrWhiteSpace($configuredRoot)) {
-        $configuredRoot = Get-DotEnvValue -Path $envPath -Name "OBSIDIAN_VAULT"
-    }
-
-    if ([string]::IsNullOrWhiteSpace($configuredRoot)) {
-        throw "OBSIDIAN_VAULT is not set in the environment or .env."
-    }
-
-    if (-not [System.IO.Path]::IsPathRooted($configuredRoot)) {
-        $configuredRoot = Join-Path $RepoRoot $configuredRoot
-    }
-
-    $resolvedRoot = [System.IO.Path]::GetFullPath($configuredRoot)
-    if (-not (Test-Path -LiteralPath $resolvedRoot)) {
-        throw "OBSIDIAN_VAULT points to '$resolvedRoot', but that directory does not exist."
-    }
-
-    return $resolvedRoot
+    return $resolutionJson | ConvertFrom-Json
 }
 
 function Reset-Directory {
@@ -79,7 +38,8 @@ function Reset-Directory {
 }
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$vaultRoot = Resolve-VaultRoot -RepoRoot $repoRoot
+$vaultResolution = Resolve-VaultRoot -RepoRoot $repoRoot -OnMissing error
+$vaultRoot = $vaultResolution.root
 $sourceRoot = Join-Path $vaultRoot ".obsidian"
 $destinationRoot = Join-Path $repoRoot ".obsidian-config"
 

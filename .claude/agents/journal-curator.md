@@ -26,7 +26,9 @@ If the parent session did not pass these in structured form, first resolve `sess
 
 ## Procedure
 
-1. Resolve today's date in local time as `YYYY-MM-DD`. Resolve `OBSIDIAN_VAULT` in this order: env var, then `./.env`, then `./archive/` with an explicit warning in the final message. Compute target path `<vault>/TeamX/Daily/<date>.md`.
+1. Resolve today's date in local time as `YYYY-MM-DD`. Resolve the vault root by calling `powershell -NoProfile -ExecutionPolicy Bypass -File .claude/scripts/resolve-vault-root.ps1 -RepoRoot <repo-root> -OnMissing archive`, then compute `<vault>/TeamX/Daily/<date>.md`.
+   - Treat only `source=archive` / `usedFallback=true` as a real fallback.
+   - If `source=env` or `source=dotenv`, write directly to that vault path and do not say the vault is unset.
 2. Resolve `session_id`: use the provided value if present; else inspect today's trace and extract the newest `"session_id":"..."` value from `snippet`.
 3. If any structured inputs are missing, filter today's trace to lines whose `snippet` contains `"session_id":"<session_id>"`, then summarize the last ~200 matching lines only.
 4. Check whether the target file exists.
@@ -34,7 +36,7 @@ If the parent session did not pass these in structured form, first resolve `sess
    - If yes: read it, verify the frontmatter is intact, then append only the new session block to the end.
 5. The session block format is fixed (see `.claude/rules/output-contract.md` section 4). Use HH:MM in local time for the block heading.
 6. Never edit prior session blocks. Never delete or reorder content.
-7. Final message: `appended session block to <absolute path>` (or `created <absolute path>` if new). If the fallback root was used, append `(OBSIDIAN_VAULT missing in env and .env - used ./archive/)`.
+7. Final message: `appended session block to <absolute path>` (or `created <absolute path>` if new). Append the fallback warning only when the resolver returned `source=archive`.
 
 ## Guardrails
 

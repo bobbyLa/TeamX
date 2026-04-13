@@ -13,7 +13,7 @@ description: Turn a single verified claim from a research run's evidence.json in
 
 - `runs/<slug>/evidence.json` exists and contains a claim matching `claim_id`.
 - `runs/<slug>/brief.md` exists (used for context extraction).
-- Resolve `OBSIDIAN_VAULT` in this order: env var, then `./.env`, then `./archive/` with an explicit warning.
+- Resolve the vault root only through `.claude/scripts/resolve-vault-root.ps1`. An empty shell `$OBSIDIAN_VAULT` is not enough to declare the vault unconfigured.
 
 ## Procedure
 
@@ -22,7 +22,10 @@ description: Turn a single verified claim from a research run's evidence.json in
 3. Derive `topic`:
    - If the user supplied one, use it.
    - Else read `evidence.json`'s `question` and the brief's `tags` frontmatter and pick a short kebab slug (one word is fine). Example: `moe`, `us-iran`, `quantization`.
-4. Resolve the vault root in this order: `$OBSIDIAN_VAULT`, then `./.env`, else `./archive/` with an explicit warning in the final message.
+4. Resolve the vault root by calling `powershell -NoProfile -ExecutionPolicy Bypass -File .claude/scripts/resolve-vault-root.ps1 -RepoRoot <repo-root> -OnMissing archive`.
+   - Parse the JSON result and use `<root>` as the vault root.
+   - Only treat `source=archive` / `usedFallback=true` as a real fallback.
+   - If `source=env` or `source=dotenv`, write directly to that vault path and do not claim the vault is unset.
 5. Target file: `<vault>/TeamX/Knowledge/<topic>/<slug>-<claim_id>.md`.
 6. If the target exists, read it. If its frontmatter `source_claim_id` matches, this is a re-promotion - allowed, overwrite the body but preserve any `## 相关` links the user added. If `source_claim_id` differs, abort with a clear error.
 7. If the target does not exist, create parent dirs.
@@ -49,7 +52,8 @@ description: Turn a single verified claim from a research run's evidence.json in
 - Only write under `<vault>/TeamX/Knowledge/**`.
 - Never modify source files under `runs/` or the brief's frontmatter.
 - Never create an atom from a claim with `confidence: low` unless the user explicitly asked - warn first.
+- The same resolver rule applies to ad-hoc `type: draft` notes under `Knowledge/`: write directly to the resolved vault path and never stage them under `archive/` when the resolver returned `source=env` or `source=dotenv`.
 
 ## Final message
 
-`promoted <slug>/<claim_id> -> <absolute path>` plus `refreshed links and indexes`. If fallback was used, append `(OBSIDIAN_VAULT missing in env and .env - used ./archive/)`.
+`promoted <slug>/<claim_id> -> <absolute path>` plus `refreshed links and indexes`. Append the fallback warning only when the resolver returned `source=archive`.

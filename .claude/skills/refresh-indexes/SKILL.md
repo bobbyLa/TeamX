@@ -15,7 +15,10 @@ Each `.base` file is pure YAML. Obsidian Bases reads frontmatter properties from
 
 ## Procedure
 
-1. Resolve vault root in this order: `$OBSIDIAN_VAULT`, then `./.env`, then `./archive/`. If the fallback root is used, warn explicitly in the final message.
+1. Resolve the vault root by calling `powershell -NoProfile -ExecutionPolicy Bypass -File .claude/scripts/resolve-vault-root.ps1 -RepoRoot <repo-root> -OnMissing archive`.
+   - Parse the JSON result and use `<root>` as the vault root.
+   - Only treat `source=archive` / `usedFallback=true` as a real fallback.
+   - If `source=env` or `source=dotenv`, write directly to that vault path and do not claim the vault is unset.
 2. Ensure `<vault>/TeamX/Index/` exists.
 3. Write `runs.base` with this body (literal, safe to overwrite):
    ```yaml
@@ -82,4 +85,4 @@ Each `.base` file is pure YAML. Obsidian Bases reads frontmatter properties from
 
 ## Final message
 
-`refreshed runs.base / knowledge.base / daily.base at <absolute index path>`. If fallback was used, append `(OBSIDIAN_VAULT missing in env and .env - used ./archive/)`.
+`refreshed runs.base / knowledge.base / daily.base at <absolute index path>`. Append the fallback warning only when the resolver returned `source=archive`.

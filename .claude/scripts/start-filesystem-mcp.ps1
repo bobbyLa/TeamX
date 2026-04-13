@@ -1,78 +1,25 @@
 $ErrorActionPreference = "Stop"
 
-function Get-DotEnvValue {
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Path,
-        [Parameter(Mandatory = $true)]
-        [string]$Name
-    )
-
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return $null
-    }
-
-    foreach ($line in Get-Content -LiteralPath $Path) {
-        $trimmed = $line.Trim()
-        if ([string]::IsNullOrWhiteSpace($trimmed) -or $trimmed.StartsWith("#")) {
-            continue
-        }
-
-        $parts = $trimmed -split "=", 2
-        if ($parts.Count -ne 2 -or $parts[0].Trim() -ne $Name) {
-            continue
-        }
-
-        $value = $parts[1].Trim()
-        if ($value.Length -ge 2) {
-            $isDoubleQuoted = $value.StartsWith('"') -and $value.EndsWith('"')
-            $isSingleQuoted = $value.StartsWith("'") -and $value.EndsWith("'")
-            if ($isDoubleQuoted -or $isSingleQuoted) {
-                $value = $value.Substring(1, $value.Length - 2)
-            }
-        }
-
-        return $value
-    }
-
-    return $null
-}
-
-function Get-FilesystemRoot {
+function Resolve-VaultRoot {
     param(
         [Parameter(Mandatory = $true)]
         [string]$RepoRoot,
         [Parameter(Mandatory = $true)]
-        [string]$EnvPath
+        [ValidateSet("archive", "error")]
+        [string]$OnMissing
     )
 
-    $configuredRoot = $env:OBSIDIAN_VAULT
-    if ([string]::IsNullOrWhiteSpace($configuredRoot)) {
-        $configuredRoot = Get-DotEnvValue -Path $EnvPath -Name "OBSIDIAN_VAULT"
+    $resolver = Join-Path $PSScriptRoot "resolve-vault-root.ps1"
+    if (-not (Test-Path -LiteralPath $resolver)) {
+        throw "Vault resolver script '$resolver' does not exist."
     }
 
-    if ([string]::IsNullOrWhiteSpace($configuredRoot)) {
-        $fallbackRoot = Join-Path $RepoRoot "archive"
-        New-Item -ItemType Directory -Path $fallbackRoot -Force | Out-Null
-        return $fallbackRoot
+    $resolutionJson = & $resolver -RepoRoot $RepoRoot -OnMissing $OnMissing
+    if ([string]::IsNullOrWhiteSpace($resolutionJson)) {
+        throw "Vault resolver returned no output."
     }
 
-    if (-not [System.IO.Path]::IsPathRooted($configuredRoot)) {
-        $configuredRoot = Join-Path $RepoRoot $configuredRoot
-    }
-
-    $resolvedRoot = [System.IO.Path]::GetFullPath($configuredRoot)
-
-    if (-not (Test-Path -LiteralPath $resolvedRoot)) {
-        throw "OBSIDIAN_VAULT points to '$resolvedRoot', but that directory does not exist."
-    }
-
-    $item = Get-Item -LiteralPath $resolvedRoot
-    if (-not $item.PSIsContainer) {
-        throw "OBSIDIAN_VAULT points to '$resolvedRoot', but it is not a directory."
-    }
-
-    return $resolvedRoot
+    return $resolutionJson | ConvertFrom-Json
 }
 
 function Repair-NpxFilesystemCache {
@@ -94,8 +41,8 @@ function Repair-NpxFilesystemCache {
 }
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
-$envPath = Join-Path $repoRoot ".env"
-$filesystemRoot = Get-FilesystemRoot -RepoRoot $repoRoot -EnvPath $envPath
+$vaultResolution = Resolve-VaultRoot -RepoRoot $repoRoot -OnMissing archive
+$filesystemRoot = $vaultResolution.root
 
 Repair-NpxFilesystemCache
 

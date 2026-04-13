@@ -26,13 +26,14 @@ TeamX has two resource lanes with different concurrency rules:
 
 Execution pattern:
 
-1. If `include_tavily`, kick off `research-scout` asynchronously with `slug=<slug>, question=<question>`. Let it run while the browser lane is executing.
+1. If `include_tavily`, launch `research-scout` via the Agent tool with `subagent_type=research-scout`, `run_in_background=true`, and prompt args `slug=<slug>, question=<question>`. Record the returned background task id and do not await it here. Let it run while the browser lane is executing. If the background launch itself fails immediately because Tavily MCP tools are unavailable or misconfigured, note that failure and switch this run to the inline Tavily fallback in step 6.
 2. Drive the browser lane sequentially. For each `site` in `lineup`, launch exactly one foreground `browser-operator` with `slug=<slug>, site=<site>, question=<question>, notebook_name=<if notebooklm>`, wait for it to finish writing `runs/<slug>/raw/<site>.json`, then launch the next one.
 3. If `include_x_scan`, append one final foreground `browser-operator` call with `site=x-scan, query=<derived from question>` after the lineup sites finish.
 4. If both `grok` and `x-scan` are active, keep them on separate browser surfaces so the tab-reuse protocol stays deterministic when those two steps run back-to-back in the serialized browser lane. Grok owns a dedicated Grok tab; `x-scan` owns an X search/feed tab.
-5. Before proceeding to step 3, join the Tavily lane. If its raw artifacts are already on disk, continue; otherwise wait for its completion notification first.
+5. Before proceeding to step 3, join the Tavily lane. If a background `research-scout` task was launched, wait for its completion notification if it has not already arrived, then read `runs/<slug>/raw/tavily/status.json`. Treat the Tavily lane as complete only when that file exists and has `completed=true`. Do not use the presence of `search-*.json` alone as the completion signal, and do not poll.
+6. Inline Tavily fallback: if the background launch failed immediately, or `runs/<slug>/raw/tavily/status.json` is missing, or `status.json.error` is non-null, or `status.json.completed` is not `true`, the main session must run the Tavily lane directly in this same run. Mirror `research-scout`'s rules: generate up to 5 query variations, issue parallel `mcp__tavily__tavily_search` calls, follow up with `mcp__tavily__tavily_extract` for authoritative hits, write the raw artifacts under `runs/<slug>/raw/tavily/`, then write `status.json` with `mode="inline-fallback"` and the schema from `.claude/rules/output-contract.md`.
 
-**Do not parallelize two `browser-operator` calls. Do not serialize Tavily behind the browser lane - it must overlap wall time with it.**
+**Do not parallelize two `browser-operator` calls. Do not serialize Tavily behind the browser lane - it must overlap wall time with it. Implementation: background `research-scout`, foreground serialized `browser-operator`, inline Tavily fallback only if the background lane cannot produce a successful `raw/tavily/status.json`.**
 
 ### 3. Verify (sequential, after all of step 2 completes)
 
@@ -58,6 +59,7 @@ Failures: <source names where error was set, or "none">
 
 ## Guarantees
 - Step 2 subagents are independent across MCP lanes; within the browser lane they are serialized because `chrome-devtools` MCP is a single stateful connection to one Chrome process.
+- `runs/<slug>/raw/tavily/status.json` is the authoritative Tavily lane completion sentinel. Step 3 must not start until the active Tavily path (background or inline fallback) has produced a successful status file.
 - Steps 3-5 are strictly sequential. Do not start synthesis before verification finishes.
 - If step 2 has any partial failures (some sites wrote error stubs), still continue to step 3. The verifier is responsible for handling missing sources.
 - If `evidence.json` ends up with zero claims, fail the run and tell the user instead of writing an empty brief.
