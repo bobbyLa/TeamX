@@ -1,23 +1,23 @@
 ---
 name: orchestrate-multi-ai
-description: Run a full multi-AI research workflow — fan out to GPT/Gemini/NotebookLM/Grok + Tavily in parallel, verify, synthesize, archive to Obsidian. Use when the user asks a research question that should draw on multiple AI perspectives. The main entry point for TeamX.
+description: Run a full multi-AI research workflow - fan out to GPT/Gemini/NotebookLM/Grok + Tavily in parallel, verify, synthesize, archive to Obsidian. Use when the user asks a research question that should draw on multiple AI perspectives. The main entry point for TeamX.
 ---
 
-You are the composition recipe for a full TeamX run. This skill does no I/O itself — it instructs the main session on the order of operations.
+You are the composition recipe for a full TeamX run. This skill does no I/O itself - it instructs the main session on the order of operations.
 
 ## Inputs
-- `question` — the user's research question (required)
-- `lineup` — optional override of which AI sites to include. Default: `["gpt", "gemini", "notebooklm", "grok"]`. For MVP dry-run testing, set this to `["gpt"]`.
-- `include_x_scan` — default `false`. Set `true` for topics about recent discourse.
-- `include_tavily` — default `true`.
-- `notebook_name` — required iff `"notebooklm"` is in the lineup.
+- `question` - the user's research question (required)
+- `lineup` - optional override of which AI sites to include. Default: `["gpt", "gemini", "notebooklm", "grok"]`. For MVP dry-run testing, set this to `["gpt"]`.
+- `include_x_scan` - default `false`. Set `true` for topics about recent discourse.
+- `include_tavily` - default `true`.
+- `notebook_name` - required iff `"notebooklm"` is in the lineup.
 
 ## Steps
 
 ### 1. Slugify
-Generate `slug = <YYYY-MM-DD>_<kebab-topic>` (≤40 chars). Use today's date. `mkdir -p runs/<slug>/raw/tavily`.
+Generate `slug = <YYYY-MM-DD>_<kebab-topic>` (<= 60 chars). Use today's date. `mkdir -p runs/<slug>/raw/tavily`.
 
-### 2. Fan out (parallel — ONE message, multiple Agent calls)
+### 2. Fan out (parallel - ONE message, multiple Agent calls)
 
 In a single assistant message, launch these subagents in parallel:
 
@@ -38,7 +38,7 @@ Launch `synthesis-editor` with prompt: `slug=<slug>`. Produces `brief.md`.
 
 ### 5. Archive
 
-Launch `archive-curator` with prompt: `slug=<slug>`. Ships to `$OBSIDIAN_VAULT/TeamX/<slug>/` or `./archive/TeamX/<slug>/`.
+Launch `archive-curator` with prompt: `slug=<slug>`. Ships to `$OBSIDIAN_VAULT/TeamX/Runs/<slug>/` or `./archive/TeamX/Runs/<slug>/`.
 
 ### 6. Report
 
@@ -51,8 +51,8 @@ Failures: <source names where error was set, or "none">
 ```
 
 ## Guarantees
-- Step 2 subagents are independent — no one reads another's output mid-run.
-- Steps 3–5 are strictly sequential. Do not start synthesis before verification finishes.
+- Step 2 subagents are independent - no one reads another's output mid-run.
+- Steps 3-5 are strictly sequential. Do not start synthesis before verification finishes.
 - If step 2 has any partial failures (some sites wrote error stubs), still continue to step 3. The verifier is responsible for handling missing sources.
 - If `evidence.json` ends up with zero claims, fail the run and tell the user instead of writing an empty brief.
 

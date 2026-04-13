@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repo is
 
-TeamX is a Claude Code "second brain" team. The main session orchestrates specialized subagents that drive external AI sites (ChatGPT, Gemini, NotebookLM, Grok) and X through **chrome-devtools MCP** on an already-logged-in Chrome, run web research through **Tavily MCP**, and archive curated briefs into an Obsidian vault via filesystem MCP.
+TeamX is a Claude Code "second brain" team. The main session orchestrates specialized subagents that drive external AI sites (ChatGPT, Gemini, NotebookLM, Grok) and X through **chrome-devtools MCP** on an already-logged-in Chrome, run web research through **Tavily MCP**, and sediment the results into an Obsidian vault via filesystem MCP. The vault is the long-term memory: research runs, daily work logs, atomic knowledge notes, and queryable Bases views all live there.
 
 This is not an application codebase — there's no build or test pipeline. The "source code" is the set of skill playbooks, subagent definitions, and MCP wiring under `.claude/` and `.mcp.json`. Changes are evaluated by running an end-to-end TeamX workflow, not by unit tests.
 
@@ -26,7 +26,9 @@ Lead / Orchestrator (Claude Code main session)
    │    ├─ research-scout                      drives Tavily MCP (parallel fan-out)
    │    ├─ evidence-verifier                   reads raw/, writes evidence.json
    │    ├─ synthesis-editor                    reads evidence.json, writes brief.md
-   │    └─ archive-curator                     copies brief + evidence into Obsidian
+   │    ├─ archive-curator                     writes TeamX/Runs/<slug>/ (briefs + evidence)
+   │    ├─ journal-curator                     writes TeamX/Daily/<date>.md (session logs)
+   │    └─ knowledge-curator                   writes TeamX/Knowledge/** + TeamX/Index/**
    │
    ├─ Skills                               →  .claude/skills/*/SKILL.md
    │    ├─ ask-gpt / ask-gemini                site-specific playbooks
@@ -34,7 +36,13 @@ Lead / Orchestrator (Claude Code main session)
    │    ├─ scan-x                              X post harvester
    │    ├─ tavily-search / extract / crawl     thin Tavily wrappers
    │    ├─ build-evidence-pack                 deterministic merger
-   │    ├─ archive-to-obsidian                 vault writer
+   │    ├─ archive-to-obsidian                 vault writer (Runs/ lane)
+   │    ├─ log-day                             daily-log appender (Daily/ lane)
+   │    ├─ promote-claim                       claim → knowledge atom (Knowledge/ lane)
+   │    ├─ refresh-indexes                     regenerates Index/*.base files
+   │    ├─ obsidian-markdown / obsidian-cli    OFM syntax + CLI helpers (foundations)
+   │    ├─ obsidian-bases / json-canvas        database views + visual maps
+   │    ├─ defuddle                            web-page → clean markdown (for future Knowledge/)
    │    └─ orchestrate-multi-ai                composition recipe
    │
    ├─ MCP                                  →  .mcp.json
@@ -44,15 +52,29 @@ Lead / Orchestrator (Claude Code main session)
    │    └─ github            (stdio MCP; reads GITHUB_PERSONAL_ACCESS_TOKEN from .env)
    │
    └─ Hooks                                →  .claude/settings.json + .claude/hooks/
-        ├─ PreToolUse         pre-write-guard.sh — refuses writes outside runs/, archive/, .claude/logs/, $OBSIDIAN_VAULT
+        ├─ PreToolUse         pre-write-guard.sh — refuses writes outside runs/, archive/, .claude/logs/, $OBSIDIAN_VAULT and validates TeamX vault note schemas
         ├─ PostToolUse        log-tool-call.sh — appends JSONL to .claude/logs/trace-<date>.jsonl
         └─ SubagentStop       same log-tool-call.sh with "subagent-stop" marker
 
-Outputs                                    →  runs/<slug>/
+Per-run artifacts                          →  runs/<slug>/
    ├─ raw/<source>.json / raw/tavily/*     per-source artifacts
    ├─ evidence.json                        normalized claims + contradictions
    ├─ brief.md                             final memo
    └─ trace.jsonl                          audit log
+
+Long-term memory (Obsidian vault)          →  $OBSIDIAN_VAULT/TeamX/
+   ├─ Runs/<slug>/                         archived briefs + evidence (archive-curator)
+   │    ├─ brief.md / evidence.json
+   │    ├─ raw/                           archived source artifacts linked from the brief
+   │    ├─ assets/                        screenshots, generated images
+   │    └─ sources/                       PDFs, original documents
+   ├─ Daily/<YYYY-MM-DD>.md                session logs, one file/day (journal-curator)
+   ├─ News/inbox.md                       breaking news quick-capture
+   ├─ Knowledge/<topic>/<atom>.md          promoted claim atoms (knowledge-curator)
+   ├─ Prompts/                            reusable prompt templates (research/analysis/synthesis/sites/)
+   ├─ Resources/                           cross-run shared materials and images
+   ├─ Index/                               runs.base / knowledge.base / daily.base
+   └─ Maps/<topic>.canvas                  optional visual relationship maps
 ```
 
 | Primitive              | Path                                        |
@@ -63,8 +85,15 @@ Outputs                                    →  runs/<slug>/
 | MCP servers            | `.mcp.json`                                 |
 | Hooks config           | `.claude/settings.json`                     |
 | Hook scripts           | `.claude/hooks/*.sh`                        |
+| Vault config mirror    | `.obsidian-config/**`                       |
 | Per-run artifacts      | `runs/<slug>/` (gitignored)                 |
-| Archived briefs        | `$OBSIDIAN_VAULT/TeamX/<slug>/`             |
+| Vault — runs           | `$OBSIDIAN_VAULT/TeamX/Runs/<slug>/`        |
+| Vault — daily logs     | `$OBSIDIAN_VAULT/TeamX/Daily/<date>.md`     |
+| Vault — knowledge      | `$OBSIDIAN_VAULT/TeamX/Knowledge/<topic>/*` |
+| Vault — indexes        | `$OBSIDIAN_VAULT/TeamX/Index/*.base`        |
+| Vault — news           | `$OBSIDIAN_VAULT/TeamX/News/inbox.md`       |
+| Vault — prompts        | `$OBSIDIAN_VAULT/TeamX/Prompts/**`          |
+| Vault — resources      | `$OBSIDIAN_VAULT/TeamX/Resources/**`        |
 
 ## Running it
 
@@ -118,18 +147,41 @@ For a quick dry run while you're still validating selectors, override the lineup
 /orchestrate-multi-ai "<question>" lineup=["gpt"]
 ```
 
-### 4. Where to look for results
-- `runs/<slug>/brief.md` — the human-readable output
+### 4. Other vault operations
+
+- **Log today's session**: run `/log-day` at the end of a working session. The `journal-curator` subagent will append a structured block to `$OBSIDIAN_VAULT/TeamX/Daily/<today>.md`. Never runs automatically — if you don't invoke it, no daily log gets written.
+- **Promote a claim into a knowledge atom**: ask the main session to "promote `c03` from `<slug>`". The `knowledge-curator` subagent will create a new atom under `Knowledge/<topic>/<slug>-c03.md` with full source-run backlinks, then refresh the `Index/knowledge.base` view.
+- **Rebuild the database views**: ask "refresh indexes". The `knowledge-curator` will regenerate `runs.base`, `knowledge.base`, and `daily.base` under `Index/`.
+- **Capture breaking news**: open `News/inbox.md` in Obsidian and write a few lines. When ready for deep research, run `/orchestrate-multi-ai` and archive to `Runs/`.
+
+### 5. Where to look for results
+
+- `runs/<slug>/brief.md` — the fresh human-readable output of a research run
 - `runs/<slug>/evidence.json` — the claim graph
 - `runs/<slug>/raw/*.json` — per-source artifacts (useful for debugging a flaky site)
-- `$OBSIDIAN_VAULT/TeamX/<slug>/` — archived copy
-- `.claude/logs/trace-<date>.jsonl` — hook-written audit trail
+- `$OBSIDIAN_VAULT/TeamX/Runs/<slug>/` — archived copy of the run
+- `$OBSIDIAN_VAULT/TeamX/Daily/<date>.md` — session logs
+- `$OBSIDIAN_VAULT/TeamX/News/inbox.md` — breaking news capture
+- `$OBSIDIAN_VAULT/TeamX/Knowledge/<topic>/*.md` — promoted evergreen notes
+- `$OBSIDIAN_VAULT/TeamX/Prompts/**` — accumulated prompt templates
+- `$OBSIDIAN_VAULT/TeamX/Resources/**` — shared images and documents
+- `$OBSIDIAN_VAULT/TeamX/Index/*.base` — Obsidian Bases database views
+- `.claude/logs/trace-<date>.jsonl` — hook-written audit trail (also the source for `/log-day`)
+- `.obsidian-config/**` — versioned snapshot of the vault's portable Obsidian configuration (`scripts/sync-vault-config.ps1`)
 
 ## Team conventions
 
-- **Files, not messages, are the team's protocol.** Subagents communicate by writing into `runs/<slug>/`. Never return long prose as a subagent tool result — write the file and report `wrote <path>`.
+- **Files, not messages, are the team's protocol.** Subagents communicate by writing into `runs/<slug>/` or the vault. Never return long prose as a subagent tool result — write the file and report `wrote <path>`.
 - **Every `ask-*` skill writes its artifact even on failure.** A missing raw file is a bug; a raw file with `error.stage` set is normal. The verifier is designed to handle partial failures gracefully.
-- **`archive-curator` is the only writer into `$OBSIDIAN_VAULT`.** Nothing else touches the vault, ever. This is enforced by convention (the other subagents don't have Write in the vault path) and by the pre-write-guard hook.
+- **Three curators, three lanes into `$OBSIDIAN_VAULT`:**
+  - `archive-curator` owns `TeamX/Runs/**` (research run archives).
+  - `journal-curator` owns `TeamX/Daily/**` (session logs, append-only).
+  - `knowledge-curator` owns `TeamX/Knowledge/**` and `TeamX/Index/**` (atoms + Bases views).
+  No other subagent touches the vault. No curator writes outside its own lane. This is enforced by convention inside each curator's prompt and by the pre-write-guard hook at the vault-path level.
+- **Knowledge promotion is always explicit.** `archive-curator` never auto-promotes claims. The only way something lands in `Knowledge/` is a direct user instruction like "promote `c03` from `<slug>`". This keeps the atom library signal-dense.
+- **Daily logs are manual.** `/log-day` is the only trigger. There is no Stop-hook automation; if you forget to run it, that day has no log. This is intentional — the cost of automated pollution of the vault is higher than the cost of occasional missed days.
+- **News capture is manual.** Open `News/inbox.md` and write when something catches your attention. Deep research triggers an `/orchestrate-multi-ai` run separately.
+- **Prompt templates live in the vault.** Write effective prompts into `Prompts/**` (tagged `type: prompt-template`) so they can be searched and iterated on in Obsidian. Verified improvements sync back to `.claude/skills/ask-*/SKILL.md`.
 - **Adding a new AI site is strictly local:** copy `ask-gpt/SKILL.md` to `ask-<new-site>/SKILL.md`, change the domain and the extraction snippet, add the site name to `orchestrate-multi-ai/SKILL.md`'s default lineup. No subagent changes.
 - **Parallelism is non-negotiable in step 2 of `orchestrate-multi-ai`.** Fan-out must be a single assistant message with multiple Agent tool calls. Sequentializing defeats the architecture.
 - **Selectors come from `take_snapshot` at runtime**, not from hardcoded CSS. If a site's a11y tree changes, upgrade that one `ask-*` skill.
@@ -141,7 +193,7 @@ Read from `.env` at the project root (gitignored). Template is in `.env.example`
 
 | Var                  | What for                                                  |
 | -------------------- | --------------------------------------------------------- |
-| `OBSIDIAN_VAULT`     | absolute path to the vault root; archive-curator writes under `<vault>/TeamX/<slug>/`. If unset, falls back to `./archive/` |
+| `OBSIDIAN_VAULT`     | absolute path to the vault root; all three curators write under `<vault>/TeamX/{Runs,Daily,Knowledge,Index}/`. If unset, the project falls back to `./archive/TeamX/...` |
 | `CHROME_DEBUG_URL`   | chrome-devtools MCP `--browserUrl` target; default `http://127.0.0.1:9333` |
 | `GITHUB_PERSONAL_ACCESS_TOKEN` | GitHub MCP credential loaded by `.claude/scripts/start-github-mcp.ps1`; create it with `repo`, `read:user`, and `read:org` scopes |
 
@@ -151,8 +203,10 @@ The `PreToolUse` hook (`.claude/hooks/pre-write-guard.sh`) blocks `Write` and `E
 - `runs/**`
 - `archive/**`
 - `.claude/logs/**`
+- `.claude/plans/**`
+- `.claude/projects/*/memory/**`
 - `$OBSIDIAN_VAULT/**`
 
-This means a subagent cannot rewrite `.mcp.json`, `CLAUDE.md`, or any skill definition during a research run. To intentionally modify the architecture, do it from a plain interactive session where you'll be aware of the writes.
+This means a subagent cannot rewrite `.mcp.json`, `CLAUDE.md`, or any skill definition during a research run. To intentionally modify the architecture, do it from a plain interactive session where you'll be aware of the writes, and set `TEAMX_UNLOCK=1` in the environment (or use the Write-to-`.claude/logs/_stage/` + `mv` pattern).
 
-The `PostToolUse` hook logs every tool call (tool name + truncated input) to `.claude/logs/trace-<date>.jsonl`, which doubles as a chain-of-custody for the evidence pack.
+The `PostToolUse` hook logs every tool call (tool name + truncated input) to `.claude/logs/trace-<date>.jsonl`, which doubles as a chain-of-custody for the evidence pack and the raw source for `/log-day`.
