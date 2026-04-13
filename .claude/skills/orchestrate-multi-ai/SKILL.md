@@ -24,6 +24,7 @@ In a single assistant message, launch these subagents in parallel:
 - For each `site` in `lineup`: launch `browser-operator` with prompt: `slug=<slug>, site=<site>, question=<question>, notebook_name=<if notebooklm>`. Each browser-operator invocation targets one site only.
 - If `include_tavily`: launch `research-scout` with `slug=<slug>, question=<question>`.
 - If `include_x_scan`: launch a second `browser-operator` with `site=x-scan, query=<derived from question>`.
+- If both `grok` and `x-scan` are active, keep them on separate browser surfaces. Grok owns a dedicated Grok tab; `x-scan` owns an X search/feed tab.
 
 **Do not sequentialize step 2.** Step 2 is the whole point of having subagents.
 

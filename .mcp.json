@@ -2,14 +2,15 @@
   "mcpServers": {
     "chrome-devtools": {
       "type": "stdio",
-      "command": "cmd",
+      "command": "powershell",
       "args": [
-        "/c",
-        "npx",
-        "-y",
-        "chrome-devtools-mcp@latest",
-        "--browserUrl",
-        "${CHROME_DEBUG_URL:-http://127.0.0.1:9222}"
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        ".claude\\scripts\\run-chrome-devtools-mcp.ps1",
+        "-BrowserUrl",
+        "${CHROME_DEBUG_URL:-http://127.0.0.1:9333}"
       ]
     },
     "tavily": {
@@ -21,27 +22,25 @@
     },
     "filesystem": {
       "type": "stdio",
-      "command": "cmd",
+      "command": "powershell",
       "args": [
-        "/c",
-        "npx",
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "${OBSIDIAN_VAULT:-./archive}"
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        ".claude\\scripts\\start-filesystem-mcp.ps1"
       ]
     },
     "github": {
       "type": "stdio",
-      "command": "cmd",
+      "command": "powershell",
       "args": [
-        "/c",
-        "npx",
-        "-y",
-        "@modelcontextprotocol/server-github"
-      ],
-      "env": {
-        "GITHUB_PERSONAL_ACCESS_TOKEN": "${GITHUB_PERSONAL_ACCESS_TOKEN}"
-      }
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        ".claude\\scripts\\start-github-mcp.ps1"
+      ]
     }
   }
 }

@@ -1,23 +1,23 @@
 ---
 name: ask-gpt
-description: Ask a question to ChatGPT via the already-logged-in chat.openai.com session in the attached Chrome. Use when orchestrate-multi-ai's lineup includes GPT. Requires chrome-devtools MCP attached to a Chrome with an active ChatGPT login.
+description: Ask a question to ChatGPT via the already-logged-in `chatgpt.com` or `chat.openai.com` session in the attached Chrome. Use when orchestrate-multi-ai's lineup includes GPT. Requires chrome-devtools MCP attached to a Chrome with an active ChatGPT login.
 ---
 
 You are driving the browser-operator subagent to get a ChatGPT answer.
 
 ## Inputs
-- `slug` — the current run slug
-- `question` — the user's original question
+- `slug` - the current run slug
+- `question` - the user's original question
 
 ## Preconditions
 - Chrome is attached via `--browserUrl` (see `.mcp.json`).
-- `chatgpt.com` has an active logged-in session.
+- `chatgpt.com` or `chat.openai.com` has an active logged-in session.
 
 ## Playbook
 
 1. **Open the page**
-   - `list_pages` → if a chatgpt.com tab is open, `select_page` it; otherwise `new_page` to `https://chatgpt.com/`.
-   - `navigate_page` to `https://chatgpt.com/` if the current URL is a specific conversation (start fresh).
+   - Apply `.claude/rules/site-prompting.md` under "Tab reuse protocol" for ChatGPT (`chatgpt.com` or `chat.openai.com`).
+   - Once the tab is selected, stay in that same tab and start fresh there: prefer clicking ChatGPT's "New chat" control, and only fall back to `navigate_page` to `https://chatgpt.com/`.
 
 2. **Snapshot and find the composer**
    - `take_snapshot`.
@@ -27,10 +27,10 @@ You are driving the browser-operator subagent to get a ChatGPT answer.
    - Build the prompt envelope from `.claude/rules/site-prompting.md`, substituting `<slug>` and the question.
    - `fill` the composer UID with the envelope string.
    - Find the send button (role `button`, name "Send" or equivalent arrow icon). `click` it.
-     - Fallback: `press_key` "Enter" on the composer UID.
+   - Fallback: `press_key` "Enter" on the composer UID.
 
 4. **Wait for completion**
-   - `wait_for` until the "Stop generating" button disappears AND a "Regenerate" / "Copy" action appears on the last turn. Timeout 120s.
+   - `wait_for` until the "Stop generating" button disappears and a "Regenerate" or "Copy" action appears on the last turn. Timeout 120s.
 
 5. **Extract the last assistant message**
    - `evaluate_script` something like:
@@ -59,9 +59,9 @@ You are driving the browser-operator subagent to get a ChatGPT answer.
      ```
 
 ## Failure modes
-- Composer UID not found → write error stub with `stage: "composer-missing"` and `take_screenshot` into `runs/<slug>/raw/gpt.png`.
-- Timeout waiting for completion → `stage: "timeout"`.
-- Redirected to login → `stage: "logged-out"`.
-- See `.claude/rules/site-prompting.md` § "When it goes wrong".
+- Composer UID not found: write error stub with `error.stage = "composer-missing"` and `take_screenshot` into `runs/<slug>/raw/gpt.png`.
+- Timeout waiting for completion: set `error.stage = "timeout"`.
+- Redirected to login: set `error.stage = "logged-out"`.
+- See `.claude/rules/site-prompting.md` under "When it goes wrong".
 
 Report only `wrote runs/<slug>/raw/gpt.json` when done.

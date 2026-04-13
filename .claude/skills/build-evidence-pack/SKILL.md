@@ -17,7 +17,7 @@ You turn `runs/<slug>/raw/**` into `runs/<slug>/evidence.json`.
    - Rewrite to remove "I think" / "it seems" hedging — if a source hedged, lower its confidence.
    - Do not include opinions, pleasantries, or meta-commentary about the question itself.
 4. Merge identical claims across sources into a single entry; populate `sources[]` with every contributing source name.
-5. Assign confidence per `.claude/rules/output-contract.md` § 2:
+5. Assign confidence per `.claude/rules/output-contract.md` under "2. Evidence pack":
    - `high` — ≥2 independent sources agree.
    - `medium` — 1 authoritative source (arxiv / nature / official docs / gov).
    - `low` — 1 AI-site assertion without external backing.

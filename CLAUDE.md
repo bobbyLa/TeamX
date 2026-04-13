@@ -40,7 +40,8 @@ Lead / Orchestrator (Claude Code main session)
    ├─ MCP                                  →  .mcp.json
    │    ├─ chrome-devtools   (attaches to running Chrome via --browserUrl)
    │    ├─ tavily            (remote HTTP MCP; authenticate once via /mcp)
-   │    └─ filesystem        (scoped to OBSIDIAN_VAULT or ./archive/)
+   │    ├─ filesystem        (scoped to OBSIDIAN_VAULT or ./archive/)
+   │    └─ github            (stdio MCP; reads GITHUB_PERSONAL_ACCESS_TOKEN from .env)
    │
    └─ Hooks                                →  .claude/settings.json + .claude/hooks/
         ├─ PreToolUse         pre-write-guard.sh — refuses writes outside runs/, archive/, .claude/logs/, $OBSIDIAN_VAULT
@@ -72,13 +73,21 @@ Outputs                                    →  runs/<slug>/
 Copy the env template and fill in the machine-specific paths/endpoints:
 ```bash
 cp .env.example .env
-# Edit .env and set OBSIDIAN_VAULT, CHROME_DEBUG_URL
+# Edit .env and set OBSIDIAN_VAULT, CHROME_DEBUG_URL, GITHUB_PERSONAL_ACCESS_TOKEN
 ```
 
 Launch Chrome once with the remote debugging port and a dedicated profile. On first launch, **log into ChatGPT, Gemini, NotebookLM, Grok, and X manually** — those cookies persist in `.chrome-profile/` for subsequent runs.
 ```bash
 # Windows
-chrome.exe --remote-debugging-port=9222 --user-data-dir="E:/Team2/TeamX/.chrome-profile"
+.\.claude\scripts\start-chrome-devtools.ps1
+```
+This project uses an imported copy of the system `Default` profile inside `.chrome-profile/`, so TeamX does not depend on your day-to-day Chrome instance. After the first import, TeamX reuses only the project-local profile. If your system login state changes, run `.\.claude\scripts\start-chrome-devtools.ps1 -ForceResync`.
+When Claude boots `chrome-devtools` MCP from `.mcp.json`, it now runs the same startup logic automatically, so opening Claude is enough to ensure the dedicated browser is available.
+
+If you need to launch it manually instead of using the helper script:
+```bash
+# Windows
+chrome.exe --remote-debugging-port=9333 --user-data-dir="E:/Team2/TeamX/.chrome-profile" --profile-directory=Default
 ```
 Keep this Chrome window open whenever TeamX is running. It's the long-lived browser that chrome-devtools MCP attaches to.
 
@@ -94,7 +103,7 @@ From inside `E:/Team2/TeamX`, start Claude Code, then:
 ```
 /mcp
 ```
-All three servers (`chrome-devtools`, `tavily`, `filesystem`) must show connected. If `chrome-devtools` fails, check that Chrome is running with `--remote-debugging-port=9222` and that `CHROME_DEBUG_URL` in `.env` matches. If `tavily` is disconnected, open `/mcp` and authenticate it.
+All four servers (`chrome-devtools`, `tavily`, `filesystem`, `github`) must show connected. If `chrome-devtools` fails, check that Chrome is running with `--remote-debugging-port=9333` and that `CHROME_DEBUG_URL` in `.env` matches. If `tavily` is disconnected, open `/mcp` and authenticate it. If `github` is disconnected, check that `GITHUB_PERSONAL_ACCESS_TOKEN` is set in `.env`.
 
 ### 3. Kick off a run
 
@@ -133,7 +142,8 @@ Read from `.env` at the project root (gitignored). Template is in `.env.example`
 | Var                  | What for                                                  |
 | -------------------- | --------------------------------------------------------- |
 | `OBSIDIAN_VAULT`     | absolute path to the vault root; archive-curator writes under `<vault>/TeamX/<slug>/`. If unset, falls back to `./archive/` |
-| `CHROME_DEBUG_URL`   | chrome-devtools MCP `--browserUrl` target; default `http://127.0.0.1:9222` |
+| `CHROME_DEBUG_URL`   | chrome-devtools MCP `--browserUrl` target; default `http://127.0.0.1:9333` |
+| `GITHUB_PERSONAL_ACCESS_TOKEN` | GitHub MCP credential loaded by `.claude/scripts/start-github-mcp.ps1`; create it with `repo`, `read:user`, and `read:org` scopes |
 
 ## Security fences
 

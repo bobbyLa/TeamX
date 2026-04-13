@@ -10,7 +10,21 @@
       "Bash(cat)",
       "Read(//tmp/**)",
       "mcp__plugin_github_github__get_teams",
-      "mcp__plugin_github_github__create_repository"
+      "mcp__plugin_github_github__create_repository",
+      "Bash(powershell:-NoProfile -ExecutionPolicy Bypass -File .claude\\scripts\\start-chrome-devtools.ps1*)",
+      "Bash(powershell:-NoProfile -ExecutionPolicy Bypass -File .claude\\scripts\\run-chrome-devtools-mcp.ps1*)",
+      "Bash(powershell:-NoProfile -ExecutionPolicy Bypass -File .claude\\scripts\\start-filesystem-mcp.ps1*)",
+      "Bash(powershell:-NoProfile -ExecutionPolicy Bypass -File .claude\\scripts\\start-github-mcp.ps1*)",
+      "mcp__chrome-devtools__click",
+      "mcp__chrome-devtools__take_snapshot",
+      "mcp__chrome-devtools__navigate_page",
+      "Bash(curl -s http://127.0.0.1:9333/json/version)"
     ]
-  }
+  },
+  "enabledMcpjsonServers": [
+    "chrome-devtools",
+    "tavily",
+    "filesystem",
+    "github"
+  ]
 }
