@@ -80,12 +80,12 @@ Produced by `synthesis-editor`. Reads `evidence.json` only (not raw). Max 800 wo
 
 ```markdown
 ---
-title: <Human Title>
+title: "<Human Title>"
 slug: 2026-04-13_moe-architectures
 created: 2026-04-13T12:45:00Z
 tags: [teamx, <topic-tag>]
 sources: [gpt, gemini, notebooklm, grok, tavily]
-question: <user's original question>
+question: "<user's original question>"
 ---
 
 ## TL;DR

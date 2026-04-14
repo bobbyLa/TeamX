@@ -31,12 +31,14 @@ def parse_inline_list(value: str) -> list[str]:
     return [strip_quotes(item.strip()) for item in inner.split(",") if item.strip()]
 
 
-def parse_frontmatter(text: str) -> dict[str, object]:
+def parse_frontmatter(text: str) -> tuple[dict[str, object], list[str], dict[str, str | None]]:
     lines = text.lstrip("\ufeff").splitlines()
     if not lines or lines[0].strip() != "---":
-        return {}
+        return {}, ["missing YAML frontmatter"], {}
 
     data: dict[str, object] = {}
+    errors: list[str] = []
+    quote_styles: dict[str, str | None] = {}
     current_key: str | None = None
 
     for line in lines[1:]:
@@ -72,9 +74,15 @@ def parse_frontmatter(text: str) -> dict[str, object]:
             data[key] = parse_inline_list(value)
             continue
 
+        quoted = len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}
+        quote_styles[key] = value[0] if quoted else None
+        if not quoted and ": " in value:
+            errors.append(
+                f"frontmatter field '{key}' must be quoted because its value contains ': '"
+            )
         data[key] = strip_quotes(value)
 
-    return data
+    return data, errors, quote_styles
 
 
 def as_list(value: object) -> list[str]:
@@ -115,13 +123,19 @@ def classify_lane(path: str) -> tuple[str, PurePosixPath] | None:
     return None
 
 
-def validate_runs_brief(path: PurePosixPath, frontmatter: dict[str, object]) -> list[str]:
+def validate_runs_brief(
+    path: PurePosixPath,
+    frontmatter: dict[str, object],
+    quote_styles: dict[str, str | None],
+) -> list[str]:
     errors: list[str] = []
     slug = require_string(frontmatter, "slug", errors)
     created = require_string(frontmatter, "created", errors)
 
     for field in ("title", "question"):
-        require_string(frontmatter, field, errors)
+        value = require_string(frontmatter, field, errors)
+        if value and quote_styles.get(field) != '"':
+            errors.append(f"frontmatter field '{field}' must use double quotes")
 
     tags = as_list(frontmatter.get("tags"))
     if "teamx" not in tags:
@@ -213,17 +227,19 @@ def main() -> int:
         return 0
 
     lane, tail = classified
-    frontmatter = parse_frontmatter(content)
+    frontmatter, parse_errors, quote_styles = parse_frontmatter(content)
     if not frontmatter:
-        print("pre-write-schema: missing YAML frontmatter", file=sys.stderr)
+        for error in parse_errors:
+            print(f"pre-write-schema: {error}", file=sys.stderr)
         return 2
 
     if lane == "runs-brief":
-        errors = validate_runs_brief(tail, frontmatter)
+        errors = validate_runs_brief(tail, frontmatter, quote_styles)
     elif lane == "daily":
         errors = validate_daily(tail, frontmatter)
     else:
         errors = validate_knowledge(tail, frontmatter)
+    errors = [*parse_errors, *errors]
 
     if errors:
         print(f"pre-write-schema: refusing write to {path}", file=sys.stderr)
