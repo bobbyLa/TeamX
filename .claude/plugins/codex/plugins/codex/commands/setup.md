@@ -34,4 +34,4 @@ If Codex is already installed or npm is unavailable:
 Output rules:
 - Present the final setup output to the user.
 - If installation was skipped, present the original setup output.
-- If Codex is installed but not authenticated, preserve the guidance to run `!codex login`.
+- If Codex is installed but not authenticated, preserve the guidance to run `codex login`.

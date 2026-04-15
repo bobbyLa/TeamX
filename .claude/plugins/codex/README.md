@@ -56,8 +56,10 @@ npm install -g @openai/codex
 If Codex is installed but not logged in yet, run:
 
 ```bash
-!codex login
+codex login
 ```
+
+If you are typing directly into the Claude Code input bar instead of a shell command, `!codex login` also works there.
 
 After install, you should see:
 
@@ -282,7 +284,7 @@ This way you can review the Codex work or continue the work there.
 
 If you are already signed into Codex on this machine, that account should work immediately here too. This plugin uses your local Codex CLI authentication.
 
-If you only use Claude Code today and have not used Codex yet, you will also need to sign in to Codex with either a ChatGPT account or an API key. [Codex is available with your ChatGPT subscription](https://developers.openai.com/codex/pricing/), and [`codex login`](https://developers.openai.com/codex/cli/reference/#codex-login) supports both ChatGPT and API key sign-in. Run `/codex:setup` to check whether Codex is ready, and use `!codex login` if it is not.
+If you only use Claude Code today and have not used Codex yet, you will also need to sign in to Codex with either a ChatGPT account or an API key. [Codex is available with your ChatGPT subscription](https://developers.openai.com/codex/pricing/), and [`codex login`](https://developers.openai.com/codex/cli/reference/#codex-login) supports both ChatGPT and API key sign-in. Run `/codex:setup` to check whether Codex is ready, and use `codex login` if it is not. If you are triggering it from the Claude Code input bar instead of a shell, `!codex login` works there too.
 
 ### Does the plugin use a separate Codex runtime?
 

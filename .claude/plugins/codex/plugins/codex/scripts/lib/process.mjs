@@ -1,17 +1,140 @@
+import fs from "node:fs";
+import path from "node:path";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
 
+const WINDOWS_EXECUTABLE_EXTENSIONS = new Set([".com", ".exe"]);
+const WINDOWS_CMD_SCRIPT_EXTENSIONS = new Set([".bat", ".cmd"]);
+const WINDOWS_POWERSHELL_SCRIPT_EXTENSIONS = new Set([".ps1"]);
+const DEFAULT_WINDOWS_PATHEXT = [".com", ".exe", ".bat", ".cmd", ".ps1"];
+
+function getWindowsPathEntries(env = process.env) {
+  const rawPath = env.Path ?? env.PATH ?? "";
+  return rawPath.split(";").map((value) => value.trim()).filter(Boolean);
+}
+
+function getWindowsPathExt(env = process.env) {
+  const rawPathExt = env.PATHEXT ?? env.PathExt ?? "";
+  const extensions = rawPathExt
+    ? rawPathExt.split(";").map((value) => value.trim().toLowerCase()).filter(Boolean)
+    : DEFAULT_WINDOWS_PATHEXT;
+
+  return [...new Set(extensions)];
+}
+
+function resolveWindowsCommandPath(command, cwd, env = process.env) {
+  const normalizedCwd = cwd ?? process.cwd();
+  const hasPath = path.isAbsolute(command) || /[\\/]/.test(command);
+  const extension = path.extname(command).toLowerCase();
+
+  if (hasPath) {
+    const basePath = path.isAbsolute(command) ? command : path.resolve(normalizedCwd, command);
+    if (extension) {
+      return fs.existsSync(basePath) ? basePath : null;
+    }
+
+    for (const candidateExtension of getWindowsPathExt(env)) {
+      const candidatePath = `${basePath}${candidateExtension}`;
+      if (fs.existsSync(candidatePath)) {
+        return candidatePath;
+      }
+    }
+    return null;
+  }
+
+  for (const directory of getWindowsPathEntries(env)) {
+    if (extension) {
+      const candidatePath = path.join(directory, command);
+      if (fs.existsSync(candidatePath)) {
+        return candidatePath;
+      }
+      continue;
+    }
+
+    for (const candidateExtension of getWindowsPathExt(env)) {
+      const candidatePath = path.join(directory, `${command}${candidateExtension}`);
+      if (fs.existsSync(candidatePath)) {
+        return candidatePath;
+      }
+    }
+  }
+
+  return null;
+}
+
+function quoteCmdArgument(value) {
+  const text = String(value);
+  if (text === "") {
+    return '""';
+  }
+
+  const escaped = text.replace(/"/g, '""').replace(/%/g, "%%");
+  if (!/[\s"&<>^|()!]/.test(text) && escaped === text) {
+    return escaped;
+  }
+
+  return `"${escaped}"`;
+}
+
+function quoteCmdCommandLine(commandLine) {
+  return `"${commandLine}"`;
+}
+
+function buildWindowsSpawnSpec(command, args, options = {}) {
+  const env = options.env ?? process.env;
+  const resolvedPath = resolveWindowsCommandPath(command, options.cwd, env);
+  const commandPath = resolvedPath ?? command;
+  const extension = path.extname(commandPath).toLowerCase();
+
+  if (WINDOWS_CMD_SCRIPT_EXTENSIONS.has(extension)) {
+    const commandLine = [quoteCmdArgument(commandPath), ...args.map(quoteCmdArgument)].join(" ");
+    return {
+      command: env.ComSpec ?? process.env.ComSpec ?? "cmd.exe",
+      args: ["/d", "/s", "/c", quoteCmdCommandLine(commandLine)],
+      windowsVerbatimArguments: true
+    };
+  }
+
+  if (WINDOWS_POWERSHELL_SCRIPT_EXTENSIONS.has(extension)) {
+    return {
+      command: "powershell.exe",
+      args: ["-NoLogo", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", commandPath, ...args]
+    };
+  }
+
+  if (resolvedPath && WINDOWS_EXECUTABLE_EXTENSIONS.has(extension)) {
+    return {
+      command: commandPath,
+      args
+    };
+  }
+
+  return {
+    command: commandPath,
+    args
+  };
+}
+
 export function runCommand(command, args = [], options = {}) {
-  const result = spawnSync(command, args, {
+  const env = options.env ?? process.env;
+  const spawnSpec =
+    process.platform === "win32"
+      ? buildWindowsSpawnSpec(command, args, {
+          cwd: options.cwd,
+          env
+        })
+      : { command, args };
+
+  const result = spawnSync(spawnSpec.command, spawnSpec.args, {
     cwd: options.cwd,
-    env: options.env,
+    env,
     encoding: "utf8",
     input: options.input,
     maxBuffer: options.maxBuffer,
     stdio: options.stdio ?? "pipe",
-    // Always pass argv directly so Windows metacharacters are never reinterpreted by a shell.
     shell: false,
-    windowsHide: true
+    windowsHide: true,
+    windowsVerbatimArguments: Boolean(spawnSpec.windowsVerbatimArguments)
   });
 
   return {

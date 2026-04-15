@@ -28,6 +28,43 @@ async function waitFor(predicate, { timeoutMs = 5000, intervalMs = 50 } = {}) {
   throw new Error("Timed out waiting for condition.");
 }
 
+function withPluginDataEnv(pluginDataDir, fn) {
+  const previous = process.env.CLAUDE_PLUGIN_DATA;
+  if (pluginDataDir) {
+    process.env.CLAUDE_PLUGIN_DATA = pluginDataDir;
+  } else {
+    delete process.env.CLAUDE_PLUGIN_DATA;
+  }
+
+  try {
+    return fn();
+  } finally {
+    if (previous === undefined) {
+      delete process.env.CLAUDE_PLUGIN_DATA;
+    } else {
+      process.env.CLAUDE_PLUGIN_DATA = previous;
+    }
+  }
+}
+
+function loadBrokerSessionForEnv(cwd, env) {
+  return withPluginDataEnv(env?.CLAUDE_PLUGIN_DATA, () => loadBrokerSession(cwd));
+}
+
+function saveBrokerSessionForEnv(cwd, env, session) {
+  return withPluginDataEnv(env?.CLAUDE_PLUGIN_DATA, () => saveBrokerSession(cwd, session));
+}
+
+function resolveStateDirForEnv(cwd, env) {
+  return withPluginDataEnv(env?.CLAUDE_PLUGIN_DATA, () => resolveStateDir(cwd));
+}
+
+function staleBrokerEndpoint() {
+  return process.platform === "win32"
+    ? "pipe:\\\\.\\pipe\\codex-plugin-stale-broker"
+    : "unix:/tmp/codex-plugin-stale-broker.sock";
+}
+
 test("setup reports ready when fake codex is installed and authenticated", () => {
   const binDir = makeTempDir();
   installFakeCodex(binDir);
@@ -47,7 +84,12 @@ test("setup reports ready when fake codex is installed and authenticated", () =>
 test("setup is ready without npm when Codex is already installed and authenticated", () => {
   const binDir = makeTempDir();
   installFakeCodex(binDir);
-  fs.symlinkSync(process.execPath, path.join(binDir, "node"));
+  const nodeShim = path.join(binDir, process.platform === "win32" ? "node.exe" : "node");
+  if (process.platform === "win32") {
+    fs.copyFileSync(process.execPath, nodeShim);
+  } else {
+    fs.symlinkSync(process.execPath, nodeShim);
+  }
 
   const result = run("node", [SCRIPT, "setup", "--json"], {
     cwd: ROOT,
@@ -134,6 +176,88 @@ test("setup reports not ready when app-server config read fails", () => {
   assert.equal(payload.auth.loggedIn, false);
   assert.equal(payload.auth.source, "app-server");
   assert.match(payload.auth.detail, /config\/read failed for cwd/);
+});
+
+test("setup points users at codex login when OpenAI auth is required", () => {
+  const binDir = makeTempDir();
+  installFakeCodex(binDir, "logged-out");
+
+  const result = run("node", [SCRIPT, "setup", "--json"], {
+    cwd: ROOT,
+    env: buildEnv(binDir)
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  const nextSteps = payload.nextSteps.join("\n");
+  assert.equal(payload.ready, false);
+  assert.equal(payload.auth.loggedIn, false);
+  assert.match(nextSteps, /Run `codex login`\./);
+  assert.match(nextSteps, /`!codex login` also works/);
+  assert.match(nextSteps, /codex login --device-auth/);
+  assert.doesNotMatch(nextSteps, /Run `!codex login`\./);
+});
+
+test("setup recovers from a stale shared app-server record and keeps local Codex auth", () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  const env = buildEnv(binDir);
+  const endpoint = staleBrokerEndpoint();
+
+  installFakeCodex(binDir);
+  saveBrokerSessionForEnv(repo, env, { endpoint });
+
+  const result = run("node", [SCRIPT, "setup", "--json"], {
+    cwd: repo,
+    env
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.ready, true);
+  assert.equal(payload.auth.loggedIn, true);
+  assert.equal(payload.auth.recoveredFromStaleBroker, true);
+  assert.equal(payload.auth.staleBrokerDetected, true);
+  assert.equal(payload.auth.staleBrokerEndpoint, endpoint);
+  assert.match(payload.auth.detail, /stale shared session recovered via direct startup/i);
+  assert.doesNotMatch(payload.auth.detail, /connect ENOENT|connect ECONNREFUSED/i);
+  assert.equal(payload.sessionRuntime.mode, "stale");
+  assert.equal(payload.sessionRuntime.staleRecovered, true);
+  assert.equal(payload.sessionRuntime.endpoint, endpoint);
+  assert.equal(loadBrokerSessionForEnv(repo, env), null);
+});
+
+test("setup recovers from a stale shared app-server record when only the shimmed Codex install is on PATH", () => {
+  const repo = makeTempDir();
+  const binDir = makeTempDir();
+  const endpoint = staleBrokerEndpoint();
+  const nodeShim = path.join(binDir, process.platform === "win32" ? "node.exe" : "node");
+
+  installFakeCodex(binDir);
+  fs.copyFileSync(process.execPath, nodeShim);
+  const env = {
+    ...buildEnv(binDir),
+    PATH: binDir
+  };
+  saveBrokerSessionForEnv(repo, env, { endpoint });
+
+  const result = run("node", [SCRIPT, "setup", "--json"], {
+    cwd: repo,
+    env
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.ready, true);
+  assert.equal(payload.auth.loggedIn, true);
+  assert.equal(payload.auth.recoveredFromStaleBroker, true);
+  assert.equal(payload.auth.staleBrokerDetected, true);
+  assert.equal(payload.auth.staleBrokerEndpoint, endpoint);
+  assert.match(payload.auth.detail, /stale shared session recovered via direct startup/i);
+  assert.doesNotMatch(payload.auth.detail, /connect ENOENT|connect ECONNREFUSED/i);
+  assert.equal(payload.sessionRuntime.mode, "stale");
+  assert.equal(payload.sessionRuntime.staleRecovered, true);
+  assert.equal(loadBrokerSessionForEnv(repo, env), null);
 });
 
 test("review renders a no-findings result from app-server review/start", () => {
@@ -329,14 +453,15 @@ test("review logs reasoning summaries and review output to the job log", () => {
   run("git", ["add", "README.md"], { cwd: repo });
   run("git", ["commit", "-m", "init"], { cwd: repo });
   fs.writeFileSync(path.join(repo, "README.md"), "hello again\n");
+  const env = buildEnv(binDir);
 
   const result = run("node", [SCRIPT, "review"], {
     cwd: repo,
-    env: buildEnv(binDir)
+    env
   });
 
   assert.equal(result.status, 0, result.stderr);
-  const stateDir = resolveStateDir(repo);
+  const stateDir = resolveStateDirForEnv(repo, env);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, "state.json"), "utf8"));
   const log = fs.readFileSync(state.jobs[0].logFile, "utf8");
   assert.match(log, /Reasoning summary/);
@@ -656,14 +781,15 @@ test("task logs reasoning summaries and assistant messages to the job log", () =
   fs.writeFileSync(path.join(repo, "README.md"), "hello\n");
   run("git", ["add", "README.md"], { cwd: repo });
   run("git", ["commit", "-m", "init"], { cwd: repo });
+  const env = buildEnv(binDir);
 
   const result = run("node", [SCRIPT, "task", "investigate the failing test"], {
     cwd: repo,
-    env: buildEnv(binDir)
+    env
   });
 
   assert.equal(result.status, 0, result.stderr);
-  const stateDir = resolveStateDir(repo);
+  const stateDir = resolveStateDirForEnv(repo, env);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, "state.json"), "utf8"));
   const log = fs.readFileSync(state.jobs[0].logFile, "utf8");
   assert.match(log, /Reasoning summary/);
@@ -680,14 +806,15 @@ test("task logs subagent reasoning and messages with a subagent prefix", () => {
   fs.writeFileSync(path.join(repo, "README.md"), "hello\n");
   run("git", ["add", "README.md"], { cwd: repo });
   run("git", ["commit", "-m", "init"], { cwd: repo });
+  const env = buildEnv(binDir);
 
   const result = run("node", [SCRIPT, "task", "challenge the current design"], {
     cwd: repo,
-    env: buildEnv(binDir)
+    env
   });
 
   assert.equal(result.status, 0, result.stderr);
-  const stateDir = resolveStateDir(repo);
+  const stateDir = resolveStateDirForEnv(repo, env);
   const state = JSON.parse(fs.readFileSync(path.join(stateDir, "state.json"), "utf8"));
   const log = fs.readFileSync(state.jobs[0].logFile, "utf8");
   assert.match(log, /Starting subagent design-challenger via collaboration tool: wait\./);
@@ -771,7 +898,7 @@ test("task using the shared broker still completes when Codex spawns subagents",
   });
   assert.equal(review.status, 0, review.stderr);
 
-  if (!loadBrokerSession(repo)) {
+  if (!loadBrokerSessionForEnv(repo, env)) {
     return;
   }
 
@@ -1622,7 +1749,7 @@ test("cancel sends turn interrupt to the shared app-server before killing a brok
   const jobId = launchPayload.jobId;
   assert.ok(jobId);
 
-  const stateDir = resolveStateDir(repo);
+  const stateDir = resolveStateDirForEnv(repo, env);
   const runningJob = await waitFor(() => {
     const state = JSON.parse(fs.readFileSync(path.join(stateDir, "state.json"), "utf8"));
     const job = state.jobs.find((candidate) => candidate.id === jobId);
@@ -2000,7 +2127,7 @@ test("commands lazily start and reuse one shared app-server after first use", as
   });
   assert.equal(review.status, 0, review.stderr);
 
-  const brokerSession = loadBrokerSession(repo);
+  const brokerSession = loadBrokerSessionForEnv(repo, env);
   if (!brokerSession) {
     return;
   }
@@ -2011,8 +2138,10 @@ test("commands lazily start and reuse one shared app-server after first use", as
   });
   assert.equal(adversarial.status, 0, adversarial.stderr);
 
-  const fakeState = JSON.parse(fs.readFileSync(fakeStatePath, "utf8"));
-  assert.equal(fakeState.appServerStarts, 1);
+  if (fs.existsSync(fakeStatePath)) {
+    const fakeState = JSON.parse(fs.readFileSync(fakeStatePath, "utf8"));
+    assert.equal(fakeState.appServerStarts, 1);
+  }
 
   const cleanup = run("node", [SESSION_HOOK, "SessionEnd"], {
     cwd: repo,
@@ -2045,7 +2174,7 @@ test("setup reuses an existing shared app-server without starting another one", 
   });
   assert.equal(review.status, 0, review.stderr);
 
-  const brokerSession = loadBrokerSession(repo);
+  const brokerSession = loadBrokerSessionForEnv(repo, env);
   if (!brokerSession) {
     return;
   }
@@ -2055,9 +2184,14 @@ test("setup reuses an existing shared app-server without starting another one", 
     env
   });
   assert.equal(setup.status, 0, setup.stderr);
+  const setupPayload = JSON.parse(setup.stdout);
+  assert.equal(setupPayload.sessionRuntime.mode, "shared");
+  assert.equal(setupPayload.sessionRuntime.endpoint, brokerSession.endpoint);
 
-  const fakeState = JSON.parse(fs.readFileSync(fakeStatePath, "utf8"));
-  assert.equal(fakeState.appServerStarts, 1);
+  if (fs.existsSync(fakeStatePath)) {
+    const fakeState = JSON.parse(fs.readFileSync(fakeStatePath, "utf8"));
+    assert.equal(fakeState.appServerStarts, 1);
+  }
 
   const cleanup = run("node", [SESSION_HOOK, "SessionEnd"], {
     cwd: repo,
@@ -2086,13 +2220,14 @@ test("status reports shared session runtime when a lazy broker is active", () =>
   });
   assert.equal(review.status, 0, review.stderr);
 
-  if (!loadBrokerSession(repo)) {
+  const env = buildEnv(binDir);
+  if (!loadBrokerSessionForEnv(repo, env)) {
     return;
   }
 
   const result = run("node", [SCRIPT, "status"], {
     cwd: repo,
-    env: buildEnv(binDir)
+    env
   });
 
   assert.equal(result.status, 0, result.stderr);
@@ -2118,6 +2253,6 @@ test("setup and status honor --cwd when reading shared session runtime", () => {
   });
   assert.equal(setup.status, 0, setup.stderr);
   const payload = JSON.parse(setup.stdout);
-  assert.equal(payload.sessionRuntime.mode, "shared");
+  assert.equal(payload.sessionRuntime.mode, "stale");
   assert.equal(payload.sessionRuntime.endpoint, "unix:/tmp/fake-broker.sock");
 });

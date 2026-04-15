@@ -13,13 +13,14 @@ import {
     findLatestTaskThread,
     getCodexAuthStatus,
     getCodexAvailability,
-    getSessionRuntimeStatus,
+    getSetupSessionRuntimeStatus,
     interruptAppServerTurn,
     parseStructuredOutput,
     readOutputSchema,
     runAppServerReview,
     runAppServerTurn
   } from "./lib/codex.mjs";
+import { resolveCancelCleanupState } from "./lib/cancel.mjs";
 import { readStdinIfPiped } from "./lib/fs.mjs";
 import { collectReviewContext, ensureGitRepository, resolveReviewTarget } from "./lib/git.mjs";
 import { binaryAvailable, terminateProcessTree } from "./lib/process.mjs";
@@ -78,6 +79,7 @@ function printUsage() {
       "  node scripts/codex-companion.mjs review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>]",
       "  node scripts/codex-companion.mjs adversarial-review [--wait|--background] [--base <ref>] [--scope <auto|working-tree|branch>] [focus text]",
       "  node scripts/codex-companion.mjs task [--background] [--write] [--resume-last|--resume|--fresh] [--model <model|spark>] [--effort <none|minimal|low|medium|high|xhigh>] [prompt]",
+      "  node scripts/codex-companion.mjs task-resume-candidate [--json]",
       "  node scripts/codex-companion.mjs status [job-id] [--all] [--json]",
       "  node scripts/codex-companion.mjs result [job-id] [--json]",
       "  node scripts/codex-companion.mjs cancel [job-id] [--json]"
@@ -181,16 +183,28 @@ async function buildSetupReport(cwd, actionsTaken = []) {
   const nodeStatus = binaryAvailable("node", ["--version"], { cwd });
   const npmStatus = binaryAvailable("npm", ["--version"], { cwd });
   const codexStatus = getCodexAvailability(cwd);
+  const setupSessionRuntime = await getSetupSessionRuntimeStatus(process.env, workspaceRoot);
   const authStatus = await getCodexAuthStatus(cwd);
   const config = getConfig(workspaceRoot);
+  const sessionRuntime =
+    setupSessionRuntime.mode === "stale"
+      ? {
+          ...setupSessionRuntime,
+          staleRecovered: Boolean(authStatus.recoveredFromStaleBroker),
+          detail: authStatus.recoveredFromStaleBroker
+            ? "A stale shared Codex runtime record was detected. Setup verified Codex directly for this check."
+            : setupSessionRuntime.detail
+        }
+      : setupSessionRuntime;
 
   const nextSteps = [];
   if (!codexStatus.available) {
     nextSteps.push("Install Codex with `npm install -g @openai/codex`.");
   }
   if (codexStatus.available && !authStatus.loggedIn && authStatus.requiresOpenaiAuth) {
-    nextSteps.push("Run `!codex login`.");
-    nextSteps.push("If browser login is blocked, retry with `!codex login --device-auth` or `!codex login --with-api-key`.");
+    nextSteps.push("Run `codex login`.");
+    nextSteps.push("If you are entering the command directly in Claude Code instead of a shell, `!codex login` also works.");
+    nextSteps.push("If browser login is blocked, retry with `codex login --device-auth` or `codex login --with-api-key`.");
   }
   if (!config.stopReviewGate) {
     nextSteps.push("Optional: run `/codex:setup --enable-review-gate` to require a fresh review before stop.");
@@ -202,7 +216,7 @@ async function buildSetupReport(cwd, actionsTaken = []) {
     npm: npmStatus,
     codex: codexStatus,
     auth: authStatus,
-    sessionRuntime: getSessionRuntimeStatus(process.env, workspaceRoot),
+    sessionRuntime,
     reviewGateEnabled: Boolean(config.stopReviewGate),
     actionsTaken,
     nextSteps
@@ -937,45 +951,92 @@ async function handleCancel(argv) {
       interrupt.interrupted
         ? `Requested Codex turn interrupt for ${turnId} on ${threadId}.`
         : `Codex turn interrupt failed${interrupt.detail ? `: ${interrupt.detail}` : "."}`
+      );
+  }
+
+  let cleanupResult = null;
+  let cleanupFailure = null;
+  try {
+    cleanupResult = terminateProcessTree(job.pid ?? Number.NaN);
+  } catch (error) {
+    cleanupFailure = error;
+    appendLogLine(
+      job.logFile,
+      `Best-effort process cleanup failed${error instanceof Error && error.message ? `: ${error.message}` : "."}`
     );
   }
 
-  terminateProcessTree(job.pid ?? Number.NaN);
-  appendLogLine(job.logFile, "Cancelled by user.");
-
   const completedAt = nowIso();
+  const cancelState = resolveCancelCleanupState(job, cleanupResult, {
+    cleanupError: cleanupFailure,
+    completedAt,
+    turnInterruptSucceeded: interrupt.interrupted
+  });
   const nextJob = {
     ...job,
-    status: "cancelled",
-    phase: "cancelled",
-    pid: null,
-    completedAt,
-    errorMessage: "Cancelled by user."
+    status: cancelState.status,
+    phase: cancelState.phase,
+    pid: cancelState.pid,
+    ...(cancelState.cancelled
+      ? {
+          completedAt: cancelState.completedAt,
+          errorMessage: cancelState.errorMessage
+        }
+      : {})
   };
 
-  writeJobFile(workspaceRoot, job.id, {
-    ...existing,
-    ...nextJob,
-    cancelledAt: completedAt
-  });
-  upsertJob(workspaceRoot, {
-    id: job.id,
-    status: "cancelled",
-    phase: "cancelled",
-    pid: null,
-    errorMessage: "Cancelled by user.",
-    completedAt
-  });
+  if (cancelState.cancelled) {
+    appendLogLine(job.logFile, "Cancelled by user.");
+    writeJobFile(workspaceRoot, job.id, {
+      ...existing,
+      ...nextJob,
+      cancelledAt: completedAt
+    });
+    upsertJob(workspaceRoot, {
+      id: job.id,
+      status: "cancelled",
+      phase: "cancelled",
+      pid: null,
+      errorMessage: cancelState.errorMessage,
+      completedAt
+    });
+  } else {
+    appendLogLine(job.logFile, `Cancellation requested, but local process cleanup failed: ${cancelState.cleanupError}`);
+    writeJobFile(workspaceRoot, job.id, {
+      ...existing,
+      ...nextJob
+    });
+    upsertJob(workspaceRoot, {
+      id: job.id,
+      status: cancelState.status,
+      phase: cancelState.phase,
+      pid: cancelState.pid
+    });
+  }
 
   const payload = {
     jobId: job.id,
-    status: "cancelled",
+    status: nextJob.status,
     title: job.title,
     turnInterruptAttempted: interrupt.attempted,
-    turnInterrupted: interrupt.interrupted
+    turnInterrupted: interrupt.interrupted,
+    cancelled: cancelState.cancelled,
+    cleanupAttempted: cancelState.cleanupAttempted,
+    cleanupDelivered: cancelState.cleanupDelivered,
+    cleanupError: cancelState.cleanupError
   };
 
-  outputCommandResult(payload, renderCancelReport(nextJob), options.json);
+  outputCommandResult(
+    payload,
+    renderCancelReport(nextJob, {
+      cancelled: cancelState.cancelled,
+      cleanupError: cancelState.cleanupError
+    }),
+    options.json
+  );
+  if (!cancelState.cancelled) {
+    process.exitCode = 1;
+  }
 }
 
 async function main() {

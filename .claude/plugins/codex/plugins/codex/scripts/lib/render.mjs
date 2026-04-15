@@ -190,6 +190,10 @@ export function renderSetupReport(report) {
     ""
   ];
 
+  if (report.sessionRuntime.mode === "stale" && report.sessionRuntime.detail) {
+    lines.splice(lines.length - 1, 0, `- session runtime detail: ${report.sessionRuntime.detail}`);
+  }
+
   if (report.actionsTaken.length > 0) {
     lines.push("Actions taken:");
     for (const action of report.actionsTaken) {
@@ -445,11 +449,12 @@ export function renderStoredJobResult(job, storedJob) {
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
-export function renderCancelReport(job) {
+export function renderCancelReport(job, options = {}) {
+  const cancelled = options.cancelled !== false;
   const lines = [
     "# Codex Cancel",
     "",
-    `Cancelled ${job.id}.`,
+    cancelled ? `Cancelled ${job.id}.` : `Cancellation requested for ${job.id}, but the job is still active.`,
     ""
   ];
 
@@ -458,6 +463,15 @@ export function renderCancelReport(job) {
   }
   if (job.summary) {
     lines.push(`- Summary: ${job.summary}`);
+  }
+  if (!cancelled) {
+    lines.push(`- Status: ${job.status}`);
+    if (job.phase) {
+      lines.push(`- Phase: ${job.phase}`);
+    }
+    if (options.cleanupError) {
+      lines.push(`- Cleanup error: ${options.cleanupError}`);
+    }
   }
   lines.push("- Check `/codex:status` for the updated queue.");
 

@@ -36,7 +36,7 @@
  */
 import { readJsonFile } from "./fs.mjs";
 import { BROKER_BUSY_RPC_CODE, BROKER_ENDPOINT_ENV, CodexAppServerClient } from "./app-server.mjs";
-import { loadBrokerSession } from "./broker-lifecycle.mjs";
+import { clearBrokerSession, loadBrokerSession, waitForBrokerEndpoint } from "./broker-lifecycle.mjs";
 import { binaryAvailable } from "./process.mjs";
 
 const SERVICE_NAME = "claude_code_codex_plugin";
@@ -693,8 +693,73 @@ function buildAuthStatus(fields = {}) {
     verified: null,
     requiresOpenaiAuth: null,
     provider: null,
+    staleBrokerDetected: false,
+    staleBrokerEndpoint: null,
+    recoveredFromStaleBroker: false,
     ...fields
   };
+}
+
+function buildSharedSessionRuntime(endpoint) {
+  return {
+    mode: "shared",
+    label: "shared session",
+    detail: "This Claude session is configured to reuse one shared Codex runtime.",
+    endpoint,
+    staleRecovered: false
+  };
+}
+
+function buildDirectSessionRuntime() {
+  return {
+    mode: "direct",
+    label: "direct startup",
+    detail: "No shared Codex runtime is active yet. The first review or task command will start one on demand.",
+    endpoint: null,
+    staleRecovered: false
+  };
+}
+
+function buildStaleSessionRuntime(endpoint, options = {}) {
+  return {
+    mode: "stale",
+    label: "stale shared session",
+    detail: options.recovered
+      ? "A stale shared Codex runtime record was detected. Setup verified Codex directly for this check."
+      : "A shared Codex runtime record exists, but the endpoint is unavailable.",
+    endpoint,
+    staleRecovered: Boolean(options.recovered)
+  };
+}
+
+function getErrorCode(error) {
+  if (typeof error?.code === "string" && error.code) {
+    return error.code;
+  }
+  if (typeof error?.cause?.code === "string" && error.cause.code) {
+    return error.cause.code;
+  }
+  return null;
+}
+
+function getErrorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export function isRecoverableBrokerSessionError(error) {
+  const code = getErrorCode(error);
+  if (code === "ENOENT" || code === "ECONNREFUSED") {
+    return true;
+  }
+
+  const message = getErrorMessage(error);
+  return (
+    /connect\s+(enoent|econnrefused)/i.test(message) ||
+    /named pipe|socket/i.test(message) ||
+    /missing broker endpoint|broker pipe endpoint is missing its path|broker unix socket endpoint is missing its path|unsupported broker endpoint/i.test(
+      message
+    )
+  );
 }
 
 function resolveProviderConfig(configResponse) {
@@ -789,6 +854,18 @@ async function getCodexAuthStatusFromClient(client, cwd) {
   }
 }
 
+async function readAuthStatusViaAppServer(cwd, options = {}) {
+  let client = null;
+  try {
+    client = await CodexAppServerClient.connect(cwd, options);
+    return await getCodexAuthStatusFromClient(client, cwd);
+  } finally {
+    if (client) {
+      await client.close().catch(() => {});
+    }
+  }
+}
+
 export function getCodexAvailability(cwd) {
   const versionStatus = binaryAvailable("codex", ["--version"], { cwd });
   if (!versionStatus.available) {
@@ -812,20 +889,32 @@ export function getCodexAvailability(cwd) {
 export function getSessionRuntimeStatus(env = process.env, cwd = process.cwd()) {
   const endpoint = env?.[BROKER_ENDPOINT_ENV] ?? loadBrokerSession(cwd)?.endpoint ?? null;
   if (endpoint) {
-    return {
-      mode: "shared",
-      label: "shared session",
-      detail: "This Claude session is configured to reuse one shared Codex runtime.",
-      endpoint
-    };
+    return buildSharedSessionRuntime(endpoint);
   }
 
-  return {
-    mode: "direct",
-    label: "direct startup",
-    detail: "No shared Codex runtime is active yet. The first review or task command will start one on demand.",
-    endpoint: null
-  };
+  return buildDirectSessionRuntime();
+}
+
+export async function getSetupSessionRuntimeStatus(env = process.env, cwd = process.cwd(), options = {}) {
+  const endpoint = env?.[BROKER_ENDPOINT_ENV] ?? loadBrokerSession(cwd)?.endpoint ?? null;
+  if (!endpoint) {
+    return buildDirectSessionRuntime();
+  }
+
+  try {
+    const reachable = await waitForBrokerEndpoint(endpoint, options.timeoutMs ?? 150);
+    if (reachable) {
+      return buildSharedSessionRuntime(endpoint);
+    }
+  } catch (error) {
+    if (!isRecoverableBrokerSessionError(error)) {
+      throw error;
+    }
+  }
+
+  return buildStaleSessionRuntime(endpoint, {
+    recovered: options.recoveredFromStaleBroker
+  });
 }
 
 export async function getCodexAuthStatus(cwd, options = {}) {
@@ -843,22 +932,58 @@ export async function getCodexAuthStatus(cwd, options = {}) {
     };
   }
 
-  let client = null;
   try {
-    client = await CodexAppServerClient.connect(cwd, {
+    return await readAuthStatusViaAppServer(cwd, {
       env: options.env,
       reuseExistingBroker: true
     });
-    return await getCodexAuthStatusFromClient(client, cwd);
   } catch (error) {
-    return buildAuthStatus({
-      loggedIn: false,
-      detail: error instanceof Error ? error.message : String(error),
-      source: "app-server"
-    });
-  } finally {
-    if (client) {
-      await client.close().catch(() => {});
+    const configuredBrokerEndpoint = options.env?.[BROKER_ENDPOINT_ENV] ?? process.env[BROKER_ENDPOINT_ENV] ?? null;
+    const storedBrokerSession = configuredBrokerEndpoint ? null : loadBrokerSession(cwd);
+    const brokerEndpoint = configuredBrokerEndpoint ?? storedBrokerSession?.endpoint ?? null;
+
+    if (!brokerEndpoint || !isRecoverableBrokerSessionError(error)) {
+      return buildAuthStatus({
+        loggedIn: false,
+        detail: getErrorMessage(error),
+        source: "app-server"
+      });
+    }
+
+    if (storedBrokerSession?.endpoint === brokerEndpoint) {
+      clearBrokerSession(cwd);
+    }
+
+    try {
+      const directStatus = await readAuthStatusViaAppServer(cwd, {
+        env: options.env,
+        disableBroker: true
+      });
+
+      if (directStatus.loggedIn) {
+        return {
+          ...directStatus,
+          detail: `${directStatus.detail} (stale shared session recovered via direct startup)`,
+          staleBrokerDetected: true,
+          staleBrokerEndpoint: brokerEndpoint,
+          recoveredFromStaleBroker: true
+        };
+      }
+
+      return {
+        ...directStatus,
+        detail: `Stale shared session detected; direct startup check failed: ${directStatus.detail}`,
+        staleBrokerDetected: true,
+        staleBrokerEndpoint: brokerEndpoint
+      };
+    } catch (directError) {
+      return buildAuthStatus({
+        loggedIn: false,
+        detail: `Stale shared session detected; direct startup check failed: ${getErrorMessage(directError)}`,
+        source: "app-server",
+        staleBrokerDetected: true,
+        staleBrokerEndpoint: brokerEndpoint
+      });
     }
   }
 }

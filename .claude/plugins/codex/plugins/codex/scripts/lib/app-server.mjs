@@ -53,6 +53,21 @@ function createProtocolError(message, data) {
   return error;
 }
 
+function buildAppServerSpawnSpec(env = process.env) {
+  // On Windows, launch through ComSpec so Node can resolve cmd/PowerShell shims like codex.cmd.
+  if (process.platform === "win32") {
+    return {
+      command: env.ComSpec || "cmd.exe",
+      args: ["/d", "/s", "/c", "codex app-server"]
+    };
+  }
+
+  return {
+    command: "codex",
+    args: ["app-server"]
+  };
+}
+
 class AppServerClientBase {
   constructor(cwd, options = {}) {
     this.cwd = cwd;
@@ -186,9 +201,12 @@ class SpawnedCodexAppServerClient extends AppServerClientBase {
   }
 
   async initialize() {
-    this.proc = spawn("codex", ["app-server"], {
+    const env = this.options.env ?? process.env;
+    const spawnSpec = buildAppServerSpawnSpec(env);
+
+    this.proc = spawn(spawnSpec.command, spawnSpec.args, {
       cwd: this.cwd,
-      env: this.options.env ?? process.env,
+      env,
       stdio: ["pipe", "pipe", "pipe"],
       shell: false,
       windowsHide: true
@@ -241,7 +259,7 @@ class SpawnedCodexAppServerClient extends AppServerClientBase {
       this.proc.stdin.end();
       setTimeout(() => {
         if (this.proc && !this.proc.killed && this.proc.exitCode === null) {
-          // On Windows with shell: true, the direct child is cmd.exe.
+          // On Windows the direct child is cmd.exe because app-server launches through ComSpec.
           // Use terminateProcessTree to kill the entire tree including
           // the grandchild node process.
           if (process.platform === "win32") {

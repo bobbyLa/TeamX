@@ -11,6 +11,10 @@ function read(relativePath) {
   return fs.readFileSync(path.join(PLUGIN_ROOT, relativePath), "utf8");
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 test("review command uses AskUserQuestion and background Bash while staying review-only", () => {
   const source = read("commands/review.md");
   assert.match(source, /AskUserQuestion/);
@@ -187,6 +191,32 @@ test("internal docs use task terminology for rescue runs", () => {
   assert.match(promptRecipes, /## Narrow Fix/);
 });
 
+test("codex skills exist and their referenced assets are wired correctly", () => {
+  const skillDirs = fs.readdirSync(path.join(PLUGIN_ROOT, "skills")).sort();
+  const rescueAgent = read("agents/codex-rescue.md");
+  const expectedSkillDirs = ["codex-cli-runtime", "codex-result-handling", "gpt-5-4-prompting"];
+  const promptReferences = [
+    "skills/gpt-5-4-prompting/references/prompt-blocks.md",
+    "skills/gpt-5-4-prompting/references/codex-prompt-recipes.md",
+    "skills/gpt-5-4-prompting/references/codex-prompt-antipatterns.md"
+  ];
+
+  assert.deepEqual(skillDirs, expectedSkillDirs);
+
+  for (const skillDir of expectedSkillDirs) {
+    const skillPath = path.join(PLUGIN_ROOT, "skills", skillDir, "SKILL.md");
+    const source = fs.readFileSync(skillPath, "utf8");
+    assert.match(source, new RegExp(`name:\\s*${escapeRegExp(skillDir)}`));
+  }
+
+  assert.match(rescueAgent, /^\s*-\s+codex-cli-runtime\s*$/m);
+  assert.match(rescueAgent, /^\s*-\s+gpt-5-4-prompting\s*$/m);
+
+  for (const referencePath of promptReferences) {
+    assert.equal(fs.existsSync(path.join(PLUGIN_ROOT, referencePath)), true, `${referencePath} should exist`);
+  }
+});
+
 test("hooks keep session-end cleanup and stop gating enabled", () => {
   const source = read("hooks/hooks.json");
   assert.match(source, /SessionStart/);
@@ -203,7 +233,9 @@ test("setup command can offer Codex install and still points users to codex logi
   assert.match(setup, /AskUserQuestion/);
   assert.match(setup, /npm install -g @openai\/codex/);
   assert.match(setup, /codex-companion\.mjs" setup --json \$ARGUMENTS/);
-  assert.match(readme, /!codex login/);
+  assert.match(setup, /preserve the guidance to run `codex login`/i);
+  assert.match(readme, /codex login/);
+  assert.match(readme, /`!codex login` also works there/i);
   assert.match(readme, /offer to install Codex for you/i);
   assert.match(readme, /\/codex:setup --enable-review-gate/);
   assert.match(readme, /\/codex:setup --disable-review-gate/);
