@@ -40,7 +40,8 @@
       "Bash(/e/Team2/TeamX/.venv/Scripts/python .claude/skills/gemini-vision/gemini_vision.py:*)",
       "Bash(.venv/Scripts/python .claude/skills/gemini-vision/gemini_vision.py \"E:/Notes/SecondBrain/TeamX/Resources/gemini-test.png\" \"请详细分析这张图片：1\\) 图片理解：描述画面中的主体、内容和构图；2\\) 风格：分析艺术风格、视觉语言和表现手法；3\\) 色彩：描述主色调、配色方案和色彩情感；4\\) 背后的意义：解读创作者想表达的思想、情感或信息。respond in simplified chinese.\" --scene fast --output \"runs/gemini-vision-test-fast.json\")",
       "Bash(.venv/Scripts/python .claude/skills/gemini-vision/gemini_vision.py \"E:/Notes/SecondBrain/TeamX/Resources/gemini-test.png\" \"请详细分析这张图片：1\\) 图片理解：描述画面中的主体、内容和构图；2\\) 风格：分析艺术风格、视觉语言和表现手法；3\\) 色彩：描述主色调、配色方案和色彩情感；4\\) 背后的意义：解读创作者想表达的思想、情感或信息。respond in simplified chinese.\" --scene basic --output \"runs/gemini-vision-test-basic.json\")",
-      "Bash(codex app-server:*)"
+      "Bash(codex app-server:*)",
+      "Bash(sed 's/.*transcript_path\\\\\\\\\\\\\\\\?\":\\\\s*\"\\\\\\([^\"]*\\\\\\)\".*/\\\\1/')"
     ]
   },
   "enabledMcpjsonServers": [
