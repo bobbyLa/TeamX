@@ -9,7 +9,8 @@ export function runCommand(command, args = [], options = {}) {
     input: options.input,
     maxBuffer: options.maxBuffer,
     stdio: options.stdio ?? "pipe",
-    shell: process.platform === "win32" ? (process.env.SHELL || true) : false,
+    // Always pass argv directly so Windows metacharacters are never reinterpreted by a shell.
+    shell: false,
     windowsHide: true
   });
 

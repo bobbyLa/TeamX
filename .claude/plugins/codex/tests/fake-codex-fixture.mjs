@@ -1,8 +1,11 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 
 import { writeExecutable } from "./helpers.mjs";
+
+const pluginDataDirs = new Map();
 
 export function installFakeCodex(binDir, behavior = "review-ok") {
   const statePath = path.join(binDir, "fake-codex-state.json");
@@ -582,8 +585,15 @@ rl.on("line", (line) => {
 
 export function buildEnv(binDir) {
   const sep = process.platform === "win32" ? ";" : ":";
+  let pluginDataDir = pluginDataDirs.get(binDir);
+  if (!pluginDataDir) {
+    pluginDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "codex-plugin-data-"));
+    pluginDataDirs.set(binDir, pluginDataDir);
+  }
+
   return {
     ...process.env,
-    PATH: `${binDir}${sep}${process.env.PATH}`
+    PATH: `${binDir}${sep}${process.env.PATH}`,
+    CLAUDE_PLUGIN_DATA: pluginDataDir
   };
 }

@@ -190,7 +190,7 @@ class SpawnedCodexAppServerClient extends AppServerClientBase {
       cwd: this.cwd,
       env: this.options.env ?? process.env,
       stdio: ["pipe", "pipe", "pipe"],
-      shell: process.platform === "win32" ? (process.env.SHELL || true) : false,
+      shell: false,
       windowsHide: true
     });
 

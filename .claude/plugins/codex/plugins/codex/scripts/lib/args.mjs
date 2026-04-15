@@ -79,14 +79,16 @@ export function splitRawArgumentString(raw) {
   let quote = null;
   let escaping = false;
 
-  for (const character of raw) {
+  for (let index = 0; index < raw.length; index += 1) {
+    const character = raw[index];
+
     if (escaping) {
       current += character;
       escaping = false;
       continue;
     }
 
-    if (character === "\\") {
+    if (character === "\\" && shouldEscapeCharacter(raw, quote, index)) {
       escaping = true;
       continue;
     }
@@ -125,4 +127,21 @@ export function splitRawArgumentString(raw) {
   }
 
   return tokens;
+}
+
+function shouldEscapeCharacter(raw, quote, index) {
+  const nextCharacter = raw[index + 1];
+  if (nextCharacter == null) {
+    return false;
+  }
+
+  if (nextCharacter === "\\") {
+    return true;
+  }
+
+  if (quote) {
+    return nextCharacter === quote;
+  }
+
+  return nextCharacter === "\"" || nextCharacter === "'" || /\s/.test(nextCharacter);
 }
